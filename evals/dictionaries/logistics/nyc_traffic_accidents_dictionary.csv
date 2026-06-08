@@ -1,0 +1,5 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+logistics,Date,Date,,date,date,,,false,
+logistics,City,City,,city,string,,,false,
+logistics,Vehicle Type,Vehicle Type,,category,string,,,false,
+logistics,Accident Count,Accident Count,,quantity,number,,sum,false,

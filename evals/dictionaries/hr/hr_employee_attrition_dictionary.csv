@@ -1,0 +1,10 @@
+column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+EmployeeNumber,Employee Number,Employee identifier,employee,string,,,true,
+Attrition,Attrition,Whether employee left,target,string,,,false,Yes|No
+Department,Department,Employee department,department,string,,,false,
+JobRole,Job Role,Employee job role,job_role,string,,,false,
+MonthlyIncome,Monthly Income,Employee monthly income,salary,number,USD,mean,true,
+OverTime,Overtime,Whether employee works overtime,overtime,string,,,false,Yes|No
+YearsAtCompany,Years At Company,Employee tenure,tenure,number,years,mean,false,
+TotalWorkingYears,Total Working Years,Total career tenure,tenure,number,years,mean,false,
+

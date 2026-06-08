@@ -1,0 +1,9 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+retail,orderDate,orderDate,,date,date,,,false,
+retail,sales,sales,,revenue,number,USD,sum,false,
+retail,quantity,quantity,,quantity,number,,sum,false,
+retail,discount,discount,,discount,number,,mean,false,
+retail,categoryName,categoryName,,category,string,,,false,
+retail,country,country,,country,string,,,false,
+retail,city,city,,city,string,,,false,
+retail,customerID,customerID,,customer,string,,,true,

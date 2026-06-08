@@ -1,0 +1,11 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+ecommerce,order_id,order_id,,customer,string,,,true,
+ecommerce,order_date,order_date,,date,date,,,false,
+ecommerce,category,category,,category,string,,,false,
+ecommerce,segment,segment,,segment,string,,,false,
+ecommerce,utm_campaign,utm_campaign,,campaign,string,,,false,
+ecommerce,utm_source,utm_source,,channel,string,,,false,
+ecommerce,quantity,quantity,,quantity,number,,sum,false,
+ecommerce,revenue,revenue,,revenue,number,USD,sum,false,
+ecommerce,cost,cost,,cost,number,USD,sum,false,
+ecommerce,profit,profit,,profit,number,USD,sum,false,

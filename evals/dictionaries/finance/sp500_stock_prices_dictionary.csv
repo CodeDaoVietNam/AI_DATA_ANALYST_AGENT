@@ -1,0 +1,5 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+finance,date,date,,date,date,,,false,
+finance,symbol,symbol,,category,string,,,false,
+finance,close,Close Price,,revenue,number,USD,mean,false,
+finance,volume,volume,,quantity,number,,sum,false,

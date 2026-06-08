@@ -1,0 +1,12 @@
+column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+Order ID,Order ID,Amazon order identifier,customer,string,,,false,
+Date,Order Date,Order placement date,date,date,,,false,
+SKU,SKU,Product SKU,category,string,,,false,
+Category,Category,Product category,category,string,,,false,
+Qty,Quantity,Units ordered,quantity,number,,sum,false,
+Amount,Revenue,Order line revenue,revenue,number,INR,sum,false,
+ship-city,Ship City,Shipping city,city,string,,,false,
+ship-state,Ship State,Shipping state,state,string,,,false,
+ship-country,Ship Country,Shipping country,country,string,,,false,
+Status,Order Status,Order fulfilment status,target,string,,,false,
+

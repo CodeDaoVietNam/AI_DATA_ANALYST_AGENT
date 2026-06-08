@@ -1,0 +1,10 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+marketing,age,age,,customer,number,,mean,true,
+marketing,job,job,,segment,string,,,false,
+marketing,education,education,,segment,string,,,false,
+marketing,balance,balance,,monetary,number,,mean,false,
+marketing,contact,contact,,channel,string,,,false,
+marketing,month,month,,date,string,,,false,
+marketing,campaign,campaign,,campaign,number,,sum,false,
+marketing,pdays,pdays,,recency,number,,mean,false,
+marketing,y,y,,target,string,,,false,

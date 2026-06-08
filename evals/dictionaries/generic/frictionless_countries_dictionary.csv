@@ -1,0 +1,3 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+generic,Country,Country,,country,string,,,false,
+generic,Population,Population,,quantity,number,,sum,false,

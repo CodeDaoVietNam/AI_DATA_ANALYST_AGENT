@@ -1,0 +1,4 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+logistics,Date,Date,,date,date,,,false,
+logistics,Transit Mode,Transit Mode,,category,string,,,false,
+logistics,Ridership,Ridership,,quantity,number,,sum,false,

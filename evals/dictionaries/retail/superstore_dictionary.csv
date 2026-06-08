@@ -1,0 +1,13 @@
+column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+Order Date,Order Date,Order placement date,date,date,,,false,
+Ship Date,Ship Date,Shipment date,date,date,,,false,
+Sales,Sales,Sales revenue,revenue,number,USD,sum,false,
+Profit,Profit,Net profit,profit,number,USD,sum,false,
+Quantity,Quantity,Units ordered,quantity,number,,sum,false,
+Discount,Discount,Discount rate,discount,number,percent,mean,false,
+Category,Category,Product category,category,string,,,false,
+Sub-Category,Sub Category,Product subcategory,category,string,,,false,
+Segment,Segment,Customer segment,segment,string,,,false,
+State,State,Customer state,state,string,,,false,
+City,City,Customer city,city,string,,,false,
+

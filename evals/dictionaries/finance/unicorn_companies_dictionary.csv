@@ -1,0 +1,6 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+finance,Date Joined,Date Joined,,date,date,,,false,
+finance,Industry,Industry,,category,string,,,false,
+finance,Country,Country,,country,string,,,false,
+finance,ValuationAmount,Valuation,,revenue,number,USD,sum,false,
+finance,FundingAmount,Funding,,cost,number,USD,sum,false,

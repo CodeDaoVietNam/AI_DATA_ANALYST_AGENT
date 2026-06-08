@@ -1,0 +1,7 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+ecommerce,Invoice,Invoice,,customer,string,,,true,
+ecommerce,Description,Description,,category,string,,,false,
+ecommerce,Quantity,Quantity,,quantity,number,,sum,false,
+ecommerce,InvoiceDate,InvoiceDate,,date,date,,,false,
+ecommerce,Revenue,Revenue,,revenue,number,GBP,sum,false,
+ecommerce,Country,Country,,country,string,,,false,

@@ -1,0 +1,4 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+survey,Department,Department,,department,string,,,false,
+survey,Job Role,Job Role,,job_role,string,,,false,
+survey,Response,Response,,target,number,,mean,false,

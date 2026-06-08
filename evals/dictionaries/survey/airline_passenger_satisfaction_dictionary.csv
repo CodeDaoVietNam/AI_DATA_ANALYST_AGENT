@@ -1,0 +1,5 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+survey,Satisfaction,Satisfaction,,target,string,,,false,
+survey,Customer Type,Customer Type,,segment,string,,,false,
+survey,Class,Class,,category,string,,,false,
+survey,Flight Distance,Flight Distance,,quantity,number,,mean,false,

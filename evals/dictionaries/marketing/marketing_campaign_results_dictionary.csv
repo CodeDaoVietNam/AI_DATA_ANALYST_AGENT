@@ -1,0 +1,13 @@
+column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+ID,Customer ID,Customer identifier,customer,string,,,true,
+Dt_Customer,Customer Since,Customer acquisition date,date,date,,,false,
+ Income ,Income,Customer annual income,salary,number,USD,mean,true,
+Country,Country,Customer country,country,string,,,false,
+Education,Education,Customer education segment,segment,string,,,false,
+Marital_Status,Marital Status,Customer household segment,segment,string,,,false,
+Recency,Recency,Days since last purchase,recency,number,days,mean,false,
+MntWines,Wine Spend,Spend on wine,monetary,number,USD,sum,false,
+NumWebPurchases,Web Purchases,Number of web purchases,frequency,number,,sum,false,
+AcceptedCmp1,Campaign 1,Campaign acceptance,campaign,boolean,,,false,
+Response,Campaign Response,Final campaign response,target,boolean,,,false,
+

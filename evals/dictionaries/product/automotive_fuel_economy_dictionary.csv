@@ -1,0 +1,4 @@
+domain,column_name,business_name,description,semantic_role,data_type,unit,aggregation,sensitive,allowed_values
+product,Model Date,Model Date,,date,date,,,false,
+product,Manufacturer,Manufacturer,,category,string,,,false,
+product,mpg,mpg,,quantity,number,,mean,false,
