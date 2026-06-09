@@ -224,7 +224,7 @@ function ChatMessage({
         <header className="copilot-bubble-header">
           <div className="copilot-agent-label">
             {entry.status === "pending" ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
-            <span>{entry.status === "pending" ? "Đang phân tích" : entry.status === "error" ? "Copilot cần xử lý" : "Câu trả lời dựa trên tool"}</span>
+            <span>{entry.status === "pending" ? t.ask.analyzing : entry.status === "error" ? t.ask.needsAttention : t.ask.groundedAnswer}</span>
           </div>
           <TrustBadges response={response} status={entry.status} />
         </header>
@@ -308,6 +308,7 @@ function ReadableAnswer({
   answer: ReturnType<typeof buildReadableAnswer>;
   status: ChatEntry["status"];
 }) {
+  const { t } = useI18n();
   if (status === "pending") {
     return (
       <div className="copilot-thinking-card">
@@ -323,19 +324,19 @@ function ReadableAnswer({
   return (
     <div className="copilot-answer-grid">
       <section className="copilot-answer-main">
-        <span>Kết luận chính</span>
+        <span>{t.ask.mainConclusion}</span>
         <p>{answer.conclusion}</p>
       </section>
       <section>
-        <span>Số liệu bằng chứng</span>
+        <span>{t.ask.evidence}</span>
         <p>{answer.evidence}</p>
       </section>
       <section>
-        <span>Vì sao quan trọng</span>
+        <span>{t.ask.whyItMatters}</span>
         <p>{answer.why}</p>
       </section>
       <section>
-        <span>Câu hỏi tiếp theo</span>
+        <span>{t.ask.nextQuestion}</span>
         <p>{answer.next}</p>
       </section>
     </div>
@@ -349,11 +350,12 @@ function AnswerCardRenderer({
   card: AnswerCard;
   onAskQuestion: (question: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="answer-card-v2">
       <section className="answer-card-hero">
         <div>
-          <span>Kết luận chính</span>
+          <span>{t.ask.mainConclusion}</span>
           <h3>{card.headline}</h3>
           <p>{card.summary}</p>
         </div>
@@ -387,13 +389,13 @@ function AnswerCardRenderer({
       )}
 
       <section className="answer-why-card">
-        <span>Vì sao quan trọng</span>
+        <span>{t.ask.whyItMatters}</span>
         <p>{card.why_it_matters}</p>
       </section>
 
       {card.recommended_next_questions.length > 0 && (
         <section className="answer-next-questions">
-          <span>Nên hỏi tiếp</span>
+          <span>{t.ask.recommendedNext}</span>
           <div>
             {card.recommended_next_questions.slice(0, 4).map((question) => (
               <button key={question} onClick={() => onAskQuestion(question)}>
@@ -409,11 +411,11 @@ function AnswerCardRenderer({
         <details className="answer-calculation-notes">
           <summary>
             <Info size={13} />
-            Nguồn tính toán và cảnh báo
+            {t.ask.calculationSource}
           </summary>
           {card.data_warnings.length > 0 && (
             <div>
-              <strong>Cảnh báo dữ liệu</strong>
+              <strong>{t.ask.dataWarnings}</strong>
               <ul>
                 {card.data_warnings.map((warning) => (
                   <li key={warning}>{warning}</li>
@@ -423,7 +425,7 @@ function AnswerCardRenderer({
           )}
           {card.calculation_notes.length > 0 && (
             <div>
-              <strong>Ghi chú tính toán</strong>
+              <strong>{t.ask.calculationNotes}</strong>
               <ul>
                 {card.calculation_notes.map((note) => (
                   <li key={note}>{note}</li>
@@ -452,9 +454,9 @@ function ResultRenderer({
       <div className="copilot-result-header">
         <div>
           <span>{t.ask.resultPreview}</span>
-          <strong>{response.result_summary?.result_type || inferResultType(rows, kpis)}</strong>
+          <strong>{translateResultType(response.result_summary?.result_type || inferResultType(rows, kpis), t)}</strong>
         </div>
-        <span>{rows.length ? `${rows.length} dòng` : `${kpis.length} metric`}</span>
+        <span>{rows.length ? `${rows.length} ${t.ask.rowsLabel}` : `${kpis.length} ${t.ask.metricsLabel}`}</span>
       </div>
 
       {kpis.length > 0 && (
@@ -480,7 +482,7 @@ function MiniResultChart({ rows }: { rows: RecordRow[] }) {
   if (!labelKey || !metricKey) return null;
   const values = rows
     .slice(0, 8)
-    .map((row) => ({ label: String(row[labelKey] ?? "N/A"), value: toNumber(row[metricKey]) ?? 0 }));
+    .map((row) => ({ label: String(row[labelKey] ?? "Không có dữ liệu"), value: toNumber(row[metricKey]) ?? 0 }));
   const max = Math.max(...values.map((item) => Math.abs(item.value)), 1);
 
   return (
@@ -529,7 +531,7 @@ function TrustBadges({ response, status }: { response: AgentResponse; status: Ch
   const { t } = useI18n();
   const source = response.explanation_source || (status === "pending" ? "running" : "tool_result");
   const totalMs = response.latency?.total_ms;
-  const cache = inferCacheState(response.cache);
+  const cache = inferCacheState(response.cache, t);
   return (
     <div className="copilot-trust-badges">
       <span>
@@ -540,7 +542,7 @@ function TrustBadges({ response, status }: { response: AgentResponse; status: Ch
         <Timer size={12} />
         {typeof totalMs === "number" ? `${Math.round(totalMs)}ms` : t.ask.latencyPending}
       </span>
-      <span>{source}</span>
+      <span>{translateSource(source, t)}</span>
       {cache && <span>{cache}</span>}
     </div>
   );
@@ -563,7 +565,7 @@ function SourceAndCalculation({ response, rows }: { response: AgentResponse; row
     <div className="copilot-source-card">
       <div>
         <span>{t.ask.source}</span>
-        <strong>{toolName}</strong>
+        <strong>{humanizeToolName(toolName)}</strong>
       </div>
       <div>
         <span>{t.ask.calculationColumns}</span>
@@ -572,7 +574,7 @@ function SourceAndCalculation({ response, rows }: { response: AgentResponse; row
       {(response.warnings.some((warning) => /missing|nan|null|partial/i.test(warning)) || hasNaNish(rows)) && (
         <div className="copilot-source-warning">
           <AlertTriangle size={12} />
-          Giá trị thiếu/NaN có thể ảnh hưởng tới tổng hoặc tỷ lệ.
+          {t.ask.missingValueWarning}
         </div>
       )}
     </div>
@@ -590,8 +592,9 @@ function QuickActions({
   onQuickAction: (action: QuickAction, response: AgentResponse) => void;
   onAskQuestion: (question: string) => void;
 }) {
+  const { t } = useI18n();
   const followUp = response.answer_card?.recommended_next_questions?.[0] ?? buildReadableAnswer({ response, status: "done" }).next;
-  const actions: QuickAction[] = normalizeQuickActions(response, rows, followUp);
+  const actions: QuickAction[] = normalizeQuickActions(response, rows, followUp, t);
 
   return (
     <div className="copilot-actions">
@@ -609,7 +612,7 @@ function QuickActions({
             }}
           >
             <Icon size={13} />
-            {action.label}
+            {t.ask.quickActions[action.action as keyof typeof t.ask.quickActions] ?? action.label}
           </button>
         );
       })}
@@ -626,6 +629,7 @@ function ErrorBubble({
   answer: string;
   onRetry: () => void;
 }) {
+  const { t } = useI18n();
   const copy = {
     backend: {
       title: "Chưa kết nối được backend",
@@ -658,7 +662,7 @@ function ErrorBubble({
         {answer && <small>{answer}</small>}
         <button onClick={onRetry}>
           <RefreshCw size={12} />
-          Thử lại / dùng fallback
+          {t.ask.retryFallback}
         </button>
       </div>
     </div>
@@ -696,18 +700,18 @@ function buildReadableAnswer(entry: Pick<ChatEntry, "response" | "status">) {
   if (entry.status === "pending") {
     return {
       conclusion: firstLine || "Copilot đang xử lý câu hỏi.",
-      evidence: "Đang chọn analysis tool và chuẩn bị chạy trên dataset hiện tại.",
-      why: "User cần biết hệ thống không bị đứng mà đang thực thi từng bước.",
-      next: "Đợi tool hoàn tất rồi xem result preview.",
+      evidence: "Đang chọn công cụ phân tích và chuẩn bị chạy trên dataset hiện tại.",
+      why: "Bạn cần thấy hệ thống đang thực thi từng bước, không phải bị đứng.",
+      next: "Đợi công cụ hoàn tất rồi xem phần xem nhanh kết quả.",
     };
   }
 
   return {
-    conclusion: firstLine || "Copilot đã hoàn tất phân tích từ tool result.",
+    conclusion: firstLine || "Copilot đã hoàn tất phân tích từ kết quả công cụ.",
     evidence: top
-      ? `Top result: ${top}${primaryValue !== undefined && primaryValue !== null ? `; ${metric} = ${formatUnknown(primaryValue)}` : ""}.`
+      ? `Kết quả nổi bật: ${top}${primaryValue !== undefined && primaryValue !== null ? `; ${humanize(metric)} = ${formatUnknown(primaryValue)}` : ""}.`
       : toolName
-        ? `Tool ${toolName} đã chạy và trả về ${summary?.row_count ?? rows.length ?? 0} dòng kết quả.`
+        ? `Công cụ ${humanizeToolName(toolName)} đã chạy và trả về ${summary?.row_count ?? rows.length ?? 0} dòng kết quả.`
         : "Kết quả được lấy từ phân tích deterministic phía backend.",
     why: inferWhyItMatters(toolName, response.answer),
     next: inferNextQuestion(toolName, rows),
@@ -743,17 +747,22 @@ function extractKpis(response: AgentResponse) {
     .map(([label, value]) => ({ label, value: formatUnknown(value) }));
 }
 
-function normalizeQuickActions(response: AgentResponse, rows: RecordRow[], followUp: string): QuickAction[] {
+function normalizeQuickActions(
+  response: AgentResponse,
+  rows: RecordRow[],
+  followUp: string,
+  t: ReturnType<typeof useI18n>["t"],
+): QuickAction[] {
   const existing = response.quick_actions ?? [];
   const byAction = new Map<string, QuickAction>();
   for (const action of existing) byAction.set(action.action, action);
   if (!byAction.has("view_chart") && (response.chart || rows.length > 1)) {
-    byAction.set("view_chart", { action: "view_chart", label: "Xem biểu đồ", payload: {} });
+    byAction.set("view_chart", { action: "view_chart", label: t.ask.quickActions.view_chart, payload: {} });
   }
-  byAction.set("export_result", { ...(byAction.get("export_result") ?? { action: "export_result", label: "Xuất kết quả", payload: {} }), label: "Xuất kết quả" });
-  byAction.set("ask_followup", { ...(byAction.get("ask_followup") ?? { action: "ask_followup", label: "Hỏi tiếp", payload: { question: followUp } }), label: "Hỏi tiếp", payload: { question: followUp } });
-  byAction.set("add_to_report", { action: "add_to_report", label: "Thêm vào report", payload: {} });
-  byAction.set("explain_calculation", { action: "explain_calculation", label: "Giải thích cách tính", payload: {} });
+  byAction.set("export_result", { ...(byAction.get("export_result") ?? { action: "export_result", label: t.ask.quickActions.export_result, payload: {} }), label: t.ask.quickActions.export_result });
+  byAction.set("ask_followup", { ...(byAction.get("ask_followup") ?? { action: "ask_followup", label: t.ask.quickActions.ask_followup, payload: { question: followUp } }), label: t.ask.quickActions.ask_followup, payload: { question: followUp } });
+  byAction.set("add_to_report", { action: "add_to_report", label: t.ask.quickActions.add_to_report, payload: {} });
+  byAction.set("explain_calculation", { action: "explain_calculation", label: t.ask.quickActions.explain_calculation, payload: {} });
   return Array.from(byAction.values());
 }
 
@@ -838,17 +847,25 @@ function toNumber(value: unknown) {
 }
 
 function inferResultType(rows: RecordRow[], kpis: Array<{ label: string; value: string }>) {
-  if (rows.length > 0) return "table/breakdown";
+  if (rows.length > 0) return "table";
   if (kpis.length > 0) return "kpi";
-  return "tool result";
+  return "tool_result";
 }
 
-function inferCacheState(cache?: Record<string, unknown>) {
+function inferCacheState(cache: Record<string, unknown> | undefined, t: ReturnType<typeof useI18n>["t"]) {
   if (!cache) return null;
   const values = Object.values(cache);
-  if (values.some((value) => String(value).toLowerCase().includes("hit") || value === true)) return "cache hit";
-  if (values.length > 0) return "cache miss";
+  if (values.some((value) => String(value).toLowerCase().includes("hit") || value === true)) return t.ask.cacheHit;
+  if (values.length > 0) return t.ask.cacheMiss;
   return null;
+}
+
+function translateSource(source: string, t: ReturnType<typeof useI18n>["t"]) {
+  return t.ask.sourceLabels[source as keyof typeof t.ask.sourceLabels] ?? source.replace(/_/g, " ");
+}
+
+function translateResultType(type: string, t: ReturnType<typeof useI18n>["t"]) {
+  return t.ask.resultTypes[type as keyof typeof t.ask.resultTypes] ?? type.replace(/_/g, " ");
 }
 
 function confidenceLabel(confidence: AnswerCard["confidence"]) {
@@ -876,9 +893,62 @@ function isRecord(value: unknown): value is RecordRow {
 }
 
 function humanize(value: string) {
-  return value
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (match) => match.toUpperCase());
+  const normalized = value.replace(/[\s-]+/g, "_").toLowerCase();
+  const labels: Record<string, string> = {
+    metric: "chỉ số",
+    rows: "số dòng",
+    columns: "số cột",
+    revenue: "doanh thu",
+    sales: "doanh số",
+    profit: "lợi nhuận",
+    margin: "biên lợi nhuận",
+    amount: "giá trị",
+    qty: "số lượng",
+    quantity: "số lượng",
+    orders: "số đơn hàng",
+    cancel_rate: "tỷ lệ hủy",
+    attrition_rate: "tỷ lệ nghỉ việc",
+    positive_rate: "tỷ lệ phản hồi",
+    response_rate: "tỷ lệ phản hồi",
+    missing_percent: "tỷ lệ thiếu dữ liệu",
+    duplicate_rows: "số dòng trùng lặp",
+    category: "nhóm sản phẩm",
+    segment: "phân khúc",
+    state: "bang/khu vực",
+    city: "thành phố",
+    country: "quốc gia",
+    department: "phòng ban",
+    job_role: "vai trò công việc",
+    campaign: "chiến dịch",
+    channel: "kênh",
+    sku: "SKU",
+  };
+  return labels[normalized] ?? normalized.replace(/_/g, " ");
+}
+
+function humanizeToolName(value: string) {
+  const labels: Record<string, string> = {
+    none: "chưa có công cụ",
+    multi_step: "phân tích nhiều bước",
+    get_dataset_overview: "tổng quan dataset",
+    get_missing_values: "kiểm tra dữ liệu thiếu",
+    get_duplicate_rows: "kiểm tra dòng trùng lặp",
+    groupby_aggregate: "tổng hợp theo nhóm",
+    correlation_analysis: "phân tích tương quan",
+    semantic_overview: "tổng quan semantic",
+    semantic_kpis: "KPI semantic",
+    semantic_time_series: "xu hướng theo thời gian",
+    semantic_breakdown: "breakdown theo nhóm",
+    semantic_target_summary: "tóm tắt target/conversion",
+    get_sales_overview: "tổng quan bán hàng",
+    revenue_by_month: "doanh thu theo tháng",
+    revenue_by_category: "doanh thu theo category",
+    top_states_by_revenue: "top khu vực theo doanh thu",
+    top_skus_by_revenue: "top SKU theo doanh thu",
+    category_cancellation_summary: "rủi ro hủy theo category",
+    generate_chart_spec: "tạo biểu đồ",
+  };
+  return labels[value] ?? value.replace(/_/g, " ");
 }
 
 function formatValue(value: number) {
@@ -889,9 +959,9 @@ function formatValue(value: number) {
 }
 
 function formatUnknown(value: unknown) {
-  if (value === null || value === undefined) return "N/A";
+  if (value === null || value === undefined) return "Không có dữ liệu";
   if (typeof value === "number") return formatValue(value);
-  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "boolean") return value ? "Có" : "Không";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }

@@ -55,8 +55,8 @@ def answer_card_to_text(card: dict[str, Any]) -> str:
     if evidence:
         lines.append("Bằng chứng:")
         for item in evidence[:5]:
-            label = item.get("label", "Metric")
-            value = item.get("value", "N/A")
+            label = item.get("label", "Chỉ số")
+            value = item.get("value", "Không có dữ liệu")
             description = item.get("description")
             suffix = f" - {description}" if description else ""
             lines.append(f"- {label}: {value}{suffix}")
@@ -114,20 +114,20 @@ def merge_llm_answer_card(base_card: dict[str, Any], llm_card: dict[str, Any]) -
 def compose_tool_error_card(tool_name: str, arguments: dict[str, Any], error: str) -> dict[str, Any]:
     card = {
         "headline": "Mình chưa chạy được phân tích này.",
-        "summary": f"Tool `{tool_name}` gặp lỗi: {error}",
+        "summary": f"Công cụ `{_humanize_tool_name(tool_name)}` gặp lỗi: {error}",
         "key_takeaways": [
-            {"label": "Lỗi tool", "text": "Câu hỏi đã được nhận nhưng bước tính toán chưa hoàn tất.", "tone": "risk"},
+            {"label": "Lỗi công cụ", "text": "Câu hỏi đã được nhận nhưng bước tính toán chưa hoàn tất.", "tone": "risk"},
             {"label": "Hành động tiếp theo", "text": "Bạn có thể hỏi lại rõ metric/dimension hơn hoặc kiểm tra semantic mapping.", "tone": "neutral"},
         ],
         "evidence": [
-            {"label": "Tool", "value": tool_name, "description": "Tool được chọn trước khi lỗi xảy ra."},
+            {"label": "Công cụ phân tích", "value": _humanize_tool_name(tool_name), "description": "Công cụ được chọn trước khi lỗi xảy ra."},
         ],
-        "why_it_matters": "Khi tool không chạy được, hệ thống không nên bịa số liệu. Cần sửa input/mapping hoặc chọn fallback an toàn.",
+        "why_it_matters": "Khi công cụ không chạy được, hệ thống không nên bịa số liệu. Cần sửa input/mapping hoặc chọn fallback an toàn.",
         "recommended_next_questions": ["Hãy tổng quan dataset này trước.", "Dataset này đang có những cột semantic nào?"],
         "confidence": "low",
         "answer_source": "tool_error",
         "data_warnings": [error],
-        "calculation_notes": [f"Arguments: {arguments}"],
+        "calculation_notes": [f"Tham số công cụ: {arguments}"],
     }
     return card
 
@@ -138,9 +138,9 @@ def _headline(tool_name: str, label: str | None, metric: str | None, metric_valu
     if tool_name == "multi_step":
         return "Mình đã tổng hợp nhiều góc phân tích để trả lời câu hỏi này."
     if "missing" in tool_name:
-        return "Data quality có một số điểm cần kiểm tra trước khi tin hoàn toàn vào insight."
+        return "Chất lượng dữ liệu có một số điểm cần kiểm tra trước khi tin hoàn toàn vào insight."
     if "duplicate" in tool_name:
-        return "Mình đã kiểm tra duplicate rows để đánh giá độ sạch của dataset."
+        return "Mình đã kiểm tra dòng trùng lặp để đánh giá độ sạch của dataset."
     if "chart" in tool_name:
         return "Biểu đồ đã được tạo từ các cột phù hợp trong dataset."
     if any(token in tool_name for token in ["cancellation", "attrition", "risk", "target"]):
@@ -154,11 +154,11 @@ def _headline(tool_name: str, label: str | None, metric: str | None, metric_valu
 
 def _summary(tool_name: str, label: str | None, metric: str | None, metric_value: Any, rows: list[dict[str, Any]], result: Any) -> str:
     if rows and label:
-        return f"Tool `{tool_name}` trả về {len(rows)} dòng kết quả; dòng nổi bật nhất là `{label}` với {_humanize(metric or 'metric')} = {_format_value(metric_value)}."
+        return f"Công cụ `{_humanize_tool_name(tool_name)}` trả về {len(rows)} dòng kết quả; dòng nổi bật nhất là `{label}` với {_humanize(metric or 'metric')} = {_format_value(metric_value)}."
     if isinstance(result, dict):
         metric_name, value = _best_metric(result)
-        return f"Tool `{tool_name}` đã chạy xong; metric nổi bật là {_humanize(metric_name or 'metric')} = {_format_value(value)}."
-    return f"Tool `{tool_name}` đã chạy xong và trả về kết quả có thể dùng để phân tích tiếp."
+        return f"Công cụ `{_humanize_tool_name(tool_name)}` đã chạy xong; chỉ số nổi bật là {_humanize(metric_name or 'metric')} = {_format_value(value)}."
+    return f"Công cụ `{_humanize_tool_name(tool_name)}` đã chạy xong và trả về kết quả có thể dùng để phân tích tiếp."
 
 
 def _evidence(tool_name: str, result: Any, summary: dict[str, Any], top_item: Any, rows: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -166,9 +166,9 @@ def _evidence(tool_name: str, result: Any, summary: dict[str, Any], top_item: An
     if isinstance(top_item, dict):
         label = _best_label(top_item)
         metric, value = _best_metric(top_item)
-        evidence.append({"label": "Nhóm nổi bật", "value": label, "description": "Dòng đầu tiên hoặc nhóm nổi bật nhất trong tool result."})
+        evidence.append({"label": "Nhóm nổi bật", "value": label, "description": "Dòng đầu tiên hoặc nhóm nổi bật nhất trong kết quả công cụ."})
         if metric:
-            evidence.append({"label": _humanize(metric), "value": _format_value(value), "description": "Metric chính trong kết quả."})
+            evidence.append({"label": _humanize(metric), "value": _format_value(value), "description": "Chỉ số chính trong kết quả."})
         for key in ["orders", "qty", "rows", "cancel_rate", "attrition_rate", "positive_rate", "margin", "revenue_share"]:
             if key in top_item and key != metric:
                 evidence.append({"label": _humanize(key), "value": _format_value(top_item.get(key)), "description": None})
@@ -181,9 +181,9 @@ def _evidence(tool_name: str, result: Any, summary: dict[str, Any], top_item: An
             if key in result:
                 evidence.append({"label": _humanize(key), "value": _format_value(result.get(key)), "description": None})
     if summary.get("row_count") is not None:
-        evidence.append({"label": "Số dòng kết quả", "value": _format_value(summary.get("row_count")), "description": "Số dòng trong result mà tool trả về."})
+        evidence.append({"label": "Số dòng kết quả", "value": _format_value(summary.get("row_count")), "description": "Số dòng trong kết quả mà công cụ trả về."})
     if not evidence:
-        evidence.append({"label": "Tool", "value": tool_name, "description": "Tool đã chạy thành công."})
+        evidence.append({"label": "Công cụ phân tích", "value": _humanize_tool_name(tool_name), "description": "Công cụ đã chạy thành công."})
     return evidence[:6]
 
 
@@ -213,7 +213,7 @@ def _takeaways(tool_name: str, label: str | None, metric: str | None, metric_val
             "text": warnings[0],
             "tone": "warning",
         })
-    return takeaways[:4] or [{"label": "Kết quả", "text": "Tool đã chạy thành công và có thể dùng cho bước phân tích tiếp theo.", "tone": "neutral"}]
+    return takeaways[:4] or [{"label": "Kết quả", "text": "Công cụ đã chạy thành công và có thể dùng cho bước phân tích tiếp theo.", "tone": "neutral"}]
 
 
 def _why_it_matters(tool_name: str, domain: str) -> str:
@@ -251,14 +251,14 @@ def _recommended_questions(tool_name: str, label: str | None, metric: str | None
 
 
 def _calculation_notes(tool_name: str, arguments: dict[str, Any], rows: list[dict[str, Any]], result: Any) -> list[str]:
-    notes = [f"Kết quả được tính bằng deterministic tool `{tool_name}`."]
+    notes = [f"Kết quả được tính bằng công cụ deterministic `{_humanize_tool_name(tool_name)}`."]
     if arguments:
-        notes.append(f"Tham số tool: {arguments}.")
+        notes.append(f"Tham số công cụ: {arguments}.")
     columns = list(rows[0].keys())[:8] if rows else list(result.keys())[:8] if isinstance(result, dict) else []
     if columns:
         notes.append(f"Các cột/field xuất hiện trong kết quả: {', '.join(map(str, columns))}.")
     if any(key in tool_name for key in ["breakdown", "category", "state", "city", "size", "sku"]):
-        notes.append("Các nhóm được aggregate từ dữ liệu sau cleaning/semantic mapping; không drop duplicate order nếu dataset ở line-item level.")
+        notes.append("Các nhóm được tổng hợp từ dữ liệu sau bước làm sạch/semantic mapping; không tự ý xóa duplicate order nếu dataset ở cấp line-item.")
     return notes
 
 
@@ -332,7 +332,7 @@ def _best_metric(row: dict[str, Any] | None) -> tuple[str | None, Any]:
 
 def _format_value(value: Any) -> str:
     if value is None:
-        return "N/A"
+        return "Không có dữ liệu"
     if isinstance(value, bool):
         return "Có" if value else "Không"
     if isinstance(value, (int, float)):
@@ -347,7 +347,73 @@ def _format_value(value: Any) -> str:
 
 
 def _humanize(value: str) -> str:
-    return value.replace("_", " ").strip().title()
+    normalized = value.replace(" ", "_").replace("-", "_").strip().lower()
+    labels = {
+        "metric": "chỉ số",
+        "rows": "số dòng",
+        "columns": "số cột",
+        "unique_orders": "số đơn hàng duy nhất",
+        "total_revenue": "tổng doanh thu",
+        "revenue": "doanh thu",
+        "sales": "doanh số",
+        "profit": "lợi nhuận",
+        "margin": "biên lợi nhuận",
+        "amount": "giá trị",
+        "total_qty": "tổng số lượng",
+        "qty": "số lượng",
+        "quantity": "số lượng",
+        "orders": "số đơn hàng",
+        "cancel_rate": "tỷ lệ hủy",
+        "overall_cancel_rate": "tỷ lệ hủy tổng thể",
+        "attrition_rate": "tỷ lệ nghỉ việc",
+        "positive_rate": "tỷ lệ phản hồi",
+        "response_rate": "tỷ lệ phản hồi",
+        "missing_percent": "tỷ lệ thiếu dữ liệu",
+        "missing_amount_rows": "số dòng thiếu amount",
+        "duplicate_rows": "số dòng trùng lặp",
+        "revenue_share": "tỷ trọng doanh thu",
+        "tool_steps": "số bước phân tích",
+        "chart_traces": "số lớp biểu đồ",
+        "category": "nhóm sản phẩm",
+        "segment": "phân khúc",
+        "state": "bang/khu vực",
+        "city": "thành phố",
+        "country": "quốc gia",
+        "department": "phòng ban",
+        "job_role": "vai trò công việc",
+        "campaign": "chiến dịch",
+        "channel": "kênh",
+        "sku": "SKU",
+        "size": "kích cỡ",
+        "order_month": "tháng đặt hàng",
+        "fulfilment": "hình thức fulfilment",
+        "courier_status": "trạng thái vận chuyển",
+    }
+    return labels.get(normalized, normalized.replace("_", " "))
+
+
+def _humanize_tool_name(tool_name: str) -> str:
+    labels = {
+        "multi_step": "phân tích nhiều bước",
+        "get_dataset_overview": "tổng quan dataset",
+        "get_missing_values": "kiểm tra dữ liệu thiếu",
+        "get_duplicate_rows": "kiểm tra dòng trùng lặp",
+        "groupby_aggregate": "tổng hợp theo nhóm",
+        "correlation_analysis": "phân tích tương quan",
+        "semantic_overview": "tổng quan semantic",
+        "semantic_kpis": "KPI semantic",
+        "semantic_time_series": "xu hướng theo thời gian",
+        "semantic_breakdown": "breakdown theo nhóm",
+        "semantic_target_summary": "tóm tắt target/conversion",
+        "get_sales_overview": "tổng quan bán hàng",
+        "revenue_by_month": "doanh thu theo tháng",
+        "revenue_by_category": "doanh thu theo category",
+        "top_states_by_revenue": "top khu vực theo doanh thu",
+        "top_skus_by_revenue": "top SKU theo doanh thu",
+        "category_cancellation_summary": "rủi ro hủy theo category",
+        "generate_chart_spec": "tạo biểu đồ",
+    }
+    return labels.get(tool_name, tool_name.replace("_", " "))
 
 
 def _safe_tone(value: Any) -> str:

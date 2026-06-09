@@ -235,7 +235,7 @@ class AgentOrchestrator:
                 }
                 tool_calls.append(call)
                 results.append({"tool_name": tool_name, "arguments": arguments, "purpose": purpose, "result": result})
-                _timeline(timeline, started_at, "tool_finished", "ok", f"Tool `{tool_name}` finished.", {"tool_name": tool_name, "execution_ms": execution_ms, "cache": cache_info["tool_results"][-1]["cache"]})
+                _timeline(timeline, started_at, "tool_finished", "ok", f"Công cụ `{tool_name}` đã chạy xong.", {"tool_name": tool_name, "execution_ms": execution_ms, "cache": cache_info["tool_results"][-1]["cache"]})
                 emit("tool_finished", {"index": index, "tool_name": tool_name, "execution_ms": execution_ms, "summary": _result_summary(result, tool_name), "cache": cache_info["tool_results"][-1]["cache"]})
             except Exception as exc:
                 _timeline(timeline, started_at, "tool_failed", "error", str(exc), {"tool_name": tool_name, "arguments": arguments})
@@ -276,11 +276,11 @@ class AgentOrchestrator:
         _timeline(timeline, started_at, "prepared_explanation", "ok", f"Prepared answer with {explanation['source']}.", {"explanation_source": explanation["source"]})
         warnings = [*plan_warnings, *explanation.get("warnings", [])]
         if _result_mentions_missing_amount(primary_result):
-            warnings.append("Revenue is calculated from available amount values; some rows have missing amount.")
+            warnings.append("Doanh thu được tính từ các giá trị amount hiện có; một số dòng đang thiếu amount.")
             if answer_card:
                 answer_card.setdefault("data_warnings", [])
-                if "Revenue is calculated from available amount values; some rows have missing amount." not in answer_card["data_warnings"]:
-                    answer_card["data_warnings"].append("Revenue is calculated from available amount values; some rows have missing amount.")
+                if "Doanh thu được tính từ các giá trị amount hiện có; một số dòng đang thiếu amount." not in answer_card["data_warnings"]:
+                    answer_card["data_warnings"].append("Doanh thu được tính từ các giá trị amount hiện có; một số dòng đang thiếu amount.")
         if hasattr(self.provider, "router_model") and cache_info.get("router_fallback"):
             warnings.append(str(cache_info["router_fallback"]))
 
@@ -446,7 +446,7 @@ class AgentOrchestrator:
             return {"error": f"Unknown or unsupported tool: {tool_name}"}
         arguments = selection.get("arguments", {})
         if not isinstance(arguments, dict):
-            return {"error": "Tool arguments must be a JSON object."}
+            return {"error": "Tham số công cụ phải là một JSON object."}
         return {"tool_name": tool_name, "arguments": arguments}
 
     def _execute_tool_cached(
@@ -606,10 +606,10 @@ class AgentOrchestrator:
                 except TypeError:
                     answer = self.provider.chat(messages)
         except Exception as exc:
-            return {"answer": deterministic_answer, "answer_card": deterministic_card, "source": "deterministic_fallback", "warnings": [f"LLM explanation fallback was used because: {str(exc)}"]}
+            return {"answer": deterministic_answer, "answer_card": deterministic_card, "source": "deterministic_fallback", "warnings": [f"Đã dùng fallback deterministic vì LLM không tạo được phần diễn giải: {str(exc)}"]}
         cleaned = answer.strip()
         if not cleaned:
-            return {"answer": deterministic_answer, "answer_card": deterministic_card, "source": "deterministic_fallback", "warnings": ["LLM returned an empty explanation, so deterministic fallback was used."]}
+            return {"answer": deterministic_answer, "answer_card": deterministic_card, "source": "deterministic_fallback", "warnings": ["LLM trả về diễn giải rỗng, nên hệ thống đã dùng fallback deterministic."]}
         try:
             llm_card = json.loads(cleaned)
             polished_card = merge_llm_answer_card(deterministic_card, llm_card)
@@ -619,7 +619,7 @@ class AgentOrchestrator:
                 "answer": deterministic_answer,
                 "answer_card": deterministic_card,
                 "source": "deterministic_fallback",
-                "warnings": [f"LLM structured answer fallback was used because: {str(exc)}"],
+                "warnings": [f"Đã dùng fallback deterministic vì LLM trả về answer card không hợp lệ: {str(exc)}"],
             }
 
     def status(self) -> dict[str, Any]:
@@ -764,7 +764,7 @@ def _deterministic_explanation(tool_name: str, arguments: dict[str, Any], result
     if tool_name == "get_dataset_overview" and isinstance(result, dict):
         return f"Tổng quan dataset: {_fmt_number(result.get('rows'))} dòng, {_fmt_number(result.get('columns'))} cột, {_fmt_number(result.get('duplicate_rows'))} dòng trùng lặp."
     if tool_name in {"get_missing_values", "get_duplicate_rows"} and isinstance(result, dict):
-        return f"Tool `{tool_name}` đã chạy xong. Xem chi tiết trong tool result."
+        return f"Công cụ `{tool_name}` đã chạy xong. Xem chi tiết trong kết quả công cụ."
     if tool_name in {"promotion_summary", "b2b_summary", "retail_margin_summary", "marketing_rfm_summary"} and isinstance(result, dict):
         metric, value = _best_metric(result)
         return f"Kết quả nổi bật từ `{tool_name}`: `{metric}` = {_fmt_number(value)}."
@@ -772,12 +772,12 @@ def _deterministic_explanation(tool_name: str, arguments: dict[str, Any], result
         return f"Tỉ lệ huỷ tổng thể là {_fmt_percent(result.get('overall_cancel_rate'))}."
     if isinstance(result, list):
         if not result:
-            return f"Tool `{tool_name}` đã chạy nhưng không có dòng kết quả phù hợp."
+            return f"Công cụ `{tool_name}` đã chạy nhưng không có dòng kết quả phù hợp."
         first = result[0]
         label = _best_label(first)
         metric_name, metric_value = _best_metric(first)
         extra = f", cancel/positive rate {_fmt_percent(first.get('cancel_rate') or first.get('positive_rate') or first.get('attrition_rate'))}" if any(key in first for key in ["cancel_rate", "positive_rate", "attrition_rate"]) else ""
-        return f"Tool `{tool_name}` đã chạy thành công. Kết quả nổi bật: `{label}` đứng đầu theo `{metric_name}` với giá trị {_fmt_number(metric_value)}{extra}."
+        return f"Công cụ `{tool_name}` đã chạy thành công. Kết quả nổi bật: `{label}` đứng đầu theo `{metric_name}` với giá trị {_fmt_number(metric_value)}{extra}."
     if isinstance(result, dict) and "items" in result:
         return _deterministic_explanation(tool_name, arguments, result.get("items") or [])
     if tool_name == "correlation_analysis" and isinstance(result, dict):
@@ -813,12 +813,12 @@ def _result_summary(result: Any, tool_name: str) -> dict[str, Any]:
 
 
 def _quick_actions(tool_name: str, result: Any, result_summary: dict[str, Any]) -> list[dict[str, Any]]:
-    actions = [{"action": "export_result", "label": "Export result", "payload": {"format": "json"}}]
+    actions = [{"action": "export_result", "label": "Xuất kết quả", "payload": {"format": "json"}}]
     if result_summary.get("has_chart"):
-        actions.insert(0, {"action": "view_chart", "label": "View chart", "payload": {}})
-    actions.append({"action": "ask_followup", "label": "Ask follow-up", "payload": {"question": _followup_question(tool_name)}})
-    actions.append({"action": "add_to_report", "label": "Add to report", "payload": {}})
-    actions.append({"action": "explain_calculation", "label": "Explain calculation", "payload": {}})
+        actions.insert(0, {"action": "view_chart", "label": "Xem biểu đồ", "payload": {}})
+    actions.append({"action": "ask_followup", "label": "Hỏi tiếp", "payload": {"question": _followup_question(tool_name)}})
+    actions.append({"action": "add_to_report", "label": "Thêm vào báo cáo", "payload": {}})
+    actions.append({"action": "explain_calculation", "label": "Giải thích cách tính", "payload": {}})
     return actions
 
 
@@ -940,14 +940,14 @@ def _fmt_number(value: Any) -> str:
     if isinstance(value, (int, float)):
         return f"{value:,.0f}"
     if value is None:
-        return "N/A"
+        return "Không có dữ liệu"
     return str(value)
 
 
 def _fmt_percent(value: Any) -> str:
     if isinstance(value, (int, float)):
         return f"{value * 100:.2f}%"
-    return "N/A"
+    return "Không có dữ liệu"
 
 
 def _chart_selection(text: str, df, ecommerce_available: bool) -> dict[str, Any] | None:
