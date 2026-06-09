@@ -47,9 +47,10 @@ export const en: Translation = {
   },
   nav: {
     upload: "Upload data",
+    profile: "Data Profile",
     overview: "Overview",
     quality: "Data quality",
-    dashboard: "Smart dashboard",
+    dashboard: "Dashboard",
     ecommerce: "Ecommerce analytics",
     charts: "Charts",
     ask: "Ask AI Copilot",
@@ -60,6 +61,11 @@ export const en: Translation = {
       eyebrow: "Ingestion",
       title: "Data intake workspace",
       subtitle: "Upload CSV or Excel files, restore recent datasets, and prepare the semantic engine.",
+    },
+    profile: {
+      eyebrow: "Profile",
+      title: "Data profile",
+      subtitle: "Dataset shape, column types, missing values, and quality health checks.",
     },
     overview: {
       eyebrow: "Profile",

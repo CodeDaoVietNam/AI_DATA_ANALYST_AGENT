@@ -30,6 +30,8 @@ result = 42
     assert res["success"] is True
     assert "Hello sandbox" in res["stdout"]
     assert res["result"] == 42
+    assert res["result_type"] == "scalar"
+    assert res["metrics"]["value"] == 42
 
 def test_security_block_unsafe_keywords():
     df = sample_df()
@@ -51,6 +53,30 @@ result = eval("5 + 5")
     # New: keyword 'eval(' is blocked at scan stage
     assert res["success"] is False
     assert "Security Block" in res["error"] or "not defined" in res["error"] or "blocked" in res["error"].lower()
+
+
+def test_no_result_returns_empty_schema():
+    df = sample_df()
+    res = execute_pandas_code(df, "x = 1")
+
+    assert res["success"] is True
+    assert res["result_type"] == "empty"
+    assert res["result"] is None
+    assert res["warnings"]
+
+
+def test_dataframe_result_returns_structured_schema():
+    df = sample_df()
+    code = """
+result = df.groupby('Category')['Amount'].sum().reset_index()
+"""
+    res = execute_pandas_code(df, code)
+
+    assert res["success"] is True
+    assert res["result_type"] == "dataframe"
+    assert res["row_count"] == 2
+    assert res["columns"] == ["Category", "Amount"]
+    assert isinstance(res["result"], list)
 
 
 def test_lazy_dataframe_dict():

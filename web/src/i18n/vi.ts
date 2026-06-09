@@ -47,19 +47,25 @@ export const vi = {
   },
   nav: {
     upload: "Nạp dữ liệu",
+    profile: "Hồ sơ dữ liệu",
     overview: "Tổng quan",
     quality: "Chất lượng dữ liệu",
-    dashboard: "Dashboard thông minh",
+    dashboard: "Dashboard",
     ecommerce: "Phân tích Ecommerce",
     charts: "Biểu đồ",
     ask: "Hỏi AI Copilot",
     report: "Báo cáo",
-  } satisfies Record<Section, string>,
+  },
   sections: {
     upload: {
       eyebrow: "Nạp dữ liệu",
       title: "Không gian nạp dữ liệu",
       subtitle: "Tải CSV hoặc Excel, khôi phục dataset gần đây và chuẩn bị semantic engine.",
+    },
+    profile: {
+      eyebrow: "Hồ sơ dữ liệu",
+      title: "Hồ sơ dữ liệu",
+      subtitle: "Kích thước, kiểu dữ liệu suy luận, missing values và các kiểm tra sức khỏe dữ liệu.",
     },
     overview: {
       eyebrow: "Hồ sơ dữ liệu",
@@ -73,7 +79,7 @@ export const vi = {
     },
     dashboard: {
       eyebrow: "Thông minh",
-      title: "Dashboard thông minh",
+      title: "Dashboard",
       subtitle: "KPI, insight, semantic mapping, data dictionary và metric builder từ backend.",
     },
     ecommerce: {
@@ -96,7 +102,7 @@ export const vi = {
       title: "Studio báo cáo điều hành",
       subtitle: "Tạo báo cáo markdown từ insight, data quality và kết quả phân tích hiện tại.",
     },
-  } satisfies Record<Section, { eyebrow: string; title: string; subtitle: string }>,
+  },
   ask: {
     timeline: {
       understanding: "Hiểu câu hỏi",

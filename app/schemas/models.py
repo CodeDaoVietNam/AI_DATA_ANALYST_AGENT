@@ -55,6 +55,20 @@ class ResultSummary(BaseModel):
     result_type: str
 
 
+class ResultQualityModel(BaseModel):
+    status: Literal["strong", "partial", "empty", "insufficient", "tool_error"]
+    reason: str
+    has_rows: bool
+    row_count: Optional[int] = None
+    has_metric: bool
+    metric_name: Optional[str] = None
+    metric_value: Optional[Any] = None
+    has_label: bool
+    label: Optional[str] = None
+    render_mode: str
+    warnings: List[str] = Field(default_factory=list)
+
+
 class QuickAction(BaseModel):
     action: Literal["view_chart", "export_result", "ask_followup", "add_to_report", "explain_calculation"]
     label: str
@@ -86,10 +100,19 @@ class AnswerCard(BaseModel):
     calculation_notes: List[str] = Field(default_factory=list)
 
 
+class ConversationMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    tool_name: Optional[str] = None
+    tool_result_summary: Optional[Dict[str, Any]] = None
+    answer_card: Optional[Dict[str, Any]] = None
+
+
 class AgentChatRequest(BaseModel):
     dataset_id: str
     question: str
     mode: Literal["fast", "balanced", "deep"] = "balanced"
+    conversation_history: List[ConversationMessage] = Field(default_factory=list)
 
 
 class AgentChatResponse(BaseModel):
@@ -103,10 +126,13 @@ class AgentChatResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     execution_timeline: List[ExecutionTimelineRecord] = Field(default_factory=list)
     result_summary: Optional[ResultSummary] = None
+    result_quality: Optional[ResultQualityModel] = None
     explanation_source: Literal["llm", "deterministic_fallback", "tool_error"] = "deterministic_fallback"
     quick_actions: List[QuickAction] = Field(default_factory=list)
     latency: Dict[str, Any] = Field(default_factory=dict)
     cache: Dict[str, Any] = Field(default_factory=dict)
+    conversation_context_used: Optional[bool] = None
+    resolved_references: List[str] = Field(default_factory=list)
 
 
 class UploadResponse(BaseModel):

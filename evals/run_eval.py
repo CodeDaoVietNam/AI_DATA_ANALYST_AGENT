@@ -46,6 +46,13 @@ class NoSemanticCache:
     def query_cache(self, dataset_id: str, question: str, threshold: float = 0.88) -> None:
         return None
 
+    def query_cache_detailed(self, dataset_id: str, question: str, threshold: float = 0.88) -> tuple[None, dict[str, Any]]:
+        return None, {
+            "status": "skipped",
+            "reason": "Semantic cache disabled for eval",
+            "similarity": None
+        }
+
     def add_to_cache(self, dataset_id: str, question: str, response: dict[str, Any]) -> None:
         return None
 

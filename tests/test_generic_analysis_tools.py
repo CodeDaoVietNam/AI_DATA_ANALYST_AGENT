@@ -171,3 +171,42 @@ def test_explain_metric_change():
     res = explain_metric_change(df, "Date", "Val", "Dim", "2026-02-01", "2026-02-28", "2026-01-01", "2026-01-31", "sum")
     assert res["absolute_change"] == 50.0
 
+
+from app.tools.generic_analysis_tools import semantic_target_summary
+
+def test_semantic_target_summary_robustness():
+    class MockRole:
+        def __init__(self, column):
+            self.column = column
+
+    class MockProfile:
+        def __init__(self, domain, roles):
+            self.domain = domain
+            self.roles = roles
+
+    # 1. Test when by_role column is identical to target column
+    df = pd.DataFrame({
+        "conversion": [1, 0, 1, 0, 1]
+    })
+    profile = MockProfile("marketing", {
+        "target": MockRole("conversion"),
+        "conversion": MockRole("conversion")
+    })
+    
+    res = semantic_target_summary(df, profile, by_role="conversion")
+    assert res["target_column"] == "conversion"
+    assert res["positive_rate"] == 0.6
+    assert len(res["by_group"]) == 2
+
+    # 2. Test when df has duplicate column names
+    df_dup = pd.DataFrame([
+        [1, 1],
+        [0, 0],
+        [1, 1],
+    ], columns=["conversion", "conversion"])
+    
+    res_dup = semantic_target_summary(df_dup, profile, by_role="conversion")
+    assert res_dup["target_column"] == "conversion"
+    assert res_dup["positive_rate"] == 2 / 3
+    assert len(res_dup["by_group"]) == 2
+

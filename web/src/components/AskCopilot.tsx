@@ -1,4 +1,5 @@
 import { useMemo, type FormEvent } from "react";
+import { marked } from "marked";
 import {
   AlertTriangle,
   BarChart3,
@@ -22,7 +23,7 @@ import {
 } from "lucide-react";
 
 import { useI18n } from "../i18n";
-import type { AgentResponse, AgentStatus, AnswerCard, DashboardResponse, RecordRow } from "../types";
+import type { AgentResponse, AgentStatus, AnswerCard, DashboardResponse, RecordRow, SemanticProfile } from "../types";
 
 export type ChatEntry = {
   id: string;
@@ -44,6 +45,7 @@ type AskCopilotProps = {
   questionDraft: string;
   setQuestionDraft: (value: string) => void;
   dashboard: DashboardResponse | null;
+  onOpenMapping?: () => void;
 };
 
 const TIMELINE_STEPS = [
@@ -64,10 +66,13 @@ export function AskCopilot({
   questionDraft,
   setQuestionDraft,
   dashboard,
+  onOpenMapping,
 }: AskCopilotProps) {
   const { t } = useI18n();
-  const domain = dashboard?.domain || "generic";
-  const suggestions = useMemo(() => t.ask.suggestions[domain as keyof typeof t.ask.suggestions] ?? t.ask.suggestions.generic, [domain, t]);
+  const { questions: suggestions, reason: suggestionReason } = useMemo(
+    () => buildSuggestedQuestions(dashboard, dashboard?.semantic_profile || null, t),
+    [dashboard, t]
+  );
   const timelineLabels = useMemo(
     () => TIMELINE_STEPS.map((step) => ({
       ...step,
@@ -102,7 +107,7 @@ export function AskCopilot({
             <span className="live-dot" />
             {isOllamaReady ? `${agentStatus?.model} · router ${agentStatus?.router_model || "default"}` : t.ask.deterministicFallback}
           </span>
-          <span className="copilot-status is-domain">{domain}</span>
+          <span className="copilot-status is-domain">{dashboard?.domain || "generic"}</span>
           {chatHistory.length > 0 && (
             <button className="btn-ghost" onClick={clearHistory}>
               {t.ask.clearChat}
@@ -115,6 +120,11 @@ export function AskCopilot({
         <div>
           <span>{t.ask.suggestionsTitle}</span>
           <p>{t.ask.suggestionsSubtitle}</p>
+          {suggestionReason && (
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">
+              {suggestionReason}
+            </p>
+          )}
         </div>
         <div className="copilot-suggestion-list">
           {suggestions.map((question) => (
@@ -127,7 +137,12 @@ export function AskCopilot({
 
       <section className="copilot-thread">
         {chatHistory.length === 0 ? (
-          <EmptyCopilotState disabled={disabled} suggestions={suggestions} onAskQuestion={onAskQuestion} />
+          <EmptyCopilotState
+            disabled={disabled}
+            suggestions={suggestions}
+            onAskQuestion={onAskQuestion}
+            suggestionReason={suggestionReason}
+          />
         ) : (
           chatHistory.map((entry) => (
             <ChatMessage
@@ -137,6 +152,7 @@ export function AskCopilot({
               onQuickAction={onQuickAction}
               onRetry={() => onAskQuestion(entry.question)}
               onAskQuestion={onAskQuestion}
+              onOpenMapping={onOpenMapping}
             />
           ))
         )}
@@ -168,10 +184,12 @@ function EmptyCopilotState({
   disabled,
   suggestions,
   onAskQuestion,
+  suggestionReason,
 }: {
   disabled: boolean;
   suggestions: string[];
   onAskQuestion: (question: string) => void;
+  suggestionReason?: string;
 }) {
   const { t } = useI18n();
   return (
@@ -188,6 +206,11 @@ function EmptyCopilotState({
           </button>
         ))}
       </div>
+      {suggestionReason && (
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-4 italic text-center">
+          {suggestionReason}
+        </p>
+      )}
     </div>
   );
 }
@@ -198,12 +221,14 @@ function ChatMessage({
   onQuickAction,
   onRetry,
   onAskQuestion,
+  onOpenMapping,
 }: {
   entry: ChatEntry;
   timelineLabels: Array<{ key: string; label: string; icon: typeof Search }>;
   onQuickAction: (action: QuickAction, response: AgentResponse) => void;
   onRetry: () => void;
   onAskQuestion: (question: string) => void;
+  onOpenMapping?: () => void;
 }) {
   const { t } = useI18n();
   const response = entry.response;
@@ -211,7 +236,8 @@ function ChatMessage({
   const kpis = extractKpis(response);
   const timeline = buildTimeline(entry, timelineLabels);
   const readable = buildReadableAnswer(entry);
-  const hasResult = rows.length > 0 || kpis.length > 0 || Boolean(response.chart);
+  const isWeakResult = entry.status !== "pending" && isWeakResultQuality(response);
+  const hasResult = !isWeakResult && (rows.length > 0 || kpis.length > 0 || Boolean(response.chart));
   const errorType = entry.status === "error" ? classifyError(response) : null;
 
   return (
@@ -232,9 +258,26 @@ function ChatMessage({
         <ExecutionTimeline timeline={timeline} status={entry.status} timelineLabels={timelineLabels} />
 
         {entry.status === "error" && errorType ? (
-          <ErrorBubble type={errorType} answer={response.answer} onRetry={onRetry} />
+          <ErrorBubble
+            type={errorType}
+            answer={response.answer}
+            onRetry={onRetry}
+            onOpenMapping={onOpenMapping}
+          />
+        ) : isWeakResult ? (
+          <InsufficientResultCard
+            response={response}
+            rows={rows}
+            onRetry={onRetry}
+            onAskQuestion={onAskQuestion}
+            onOpenMapping={onOpenMapping}
+          />
         ) : response.answer_card && entry.status !== "pending" ? (
           <AnswerCardRenderer card={response.answer_card} onAskQuestion={onAskQuestion} />
+        ) : entry.status !== "pending" && isMarkdown(response.answer) ? (
+          <div className="copilot-markdown-container p-3 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+            <MarkdownAnswerRenderer markdown={response.answer} />
+          </div>
         ) : (
           <ReadableAnswer answer={readable} status={entry.status} />
         )}
@@ -263,12 +306,63 @@ function ChatMessage({
           onAskQuestion={onAskQuestion}
         />
 
-        <details className="copilot-trace">
-          <summary>
-            <Info size={13} />
-            {t.ask.toolDetails}
+        <details className="copilot-trace mt-4 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden text-xs">
+          <summary className="flex items-center gap-1.5 p-2 bg-slate-50 dark:bg-slate-900/50 cursor-pointer list-none select-none hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors">
+            <Info size={12} className="text-slate-500" />
+            <span className="font-medium text-slate-700 dark:text-slate-300">Chi tiết kỹ thuật</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500">(Dành cho kiểm tra/debug)</span>
           </summary>
-          <pre>{JSON.stringify(buildTracePayload(response), null, 2)}</pre>
+          <div className="p-3 bg-white dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800 space-y-2.5 text-slate-600 dark:text-slate-300">
+            {response.tool_call && (
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">Công cụ phân tích:</span>
+                <code className="text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20 px-1.5 py-0.5 rounded font-mono w-max">{response.tool_call.tool_name}</code>
+              </div>
+            )}
+            {response.tool_call?.arguments && Object.keys(response.tool_call.arguments).length > 0 && (
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">Đối số đầu vào (Arguments):</span>
+                <pre className="bg-slate-50 dark:bg-slate-900 p-1.5 rounded font-mono overflow-auto max-h-40">{JSON.stringify(response.tool_call.arguments, null, 2)}</pre>
+              </div>
+            )}
+            {response.latency && (
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">Thời gian thực thi:</span>
+                <span>
+                  {Number(response.latency.total_ms || response.latency.execution_ms || 0).toFixed(0)}ms
+                </span>
+              </div>
+            )}
+            {response.cache && (
+              <div className="flex flex-col gap-1">
+                <span className="font-semibold text-slate-700 dark:text-slate-200 font-medium">Trạng thái Cache:</span>
+                <div className="pl-3 text-[11px] font-mono text-slate-600 dark:text-slate-300">
+                  <div>Semantic Cache: {response.cache.semantic_cache?.status || "n/a"} {response.cache.semantic_cache?.reason ? `(${response.cache.semantic_cache.reason})` : ""}</div>
+                  <div>Tool Cache: {response.cache.tool_result_cache?.status || "n/a"}</div>
+                </div>
+              </div>
+            )}
+            {response.result_summary && (
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">Tóm tắt kết quả (Result Summary):</span>
+                <pre className="bg-slate-50 dark:bg-slate-900 p-1.5 rounded font-mono overflow-auto max-h-40">{JSON.stringify(response.result_summary, null, 2)}</pre>
+              </div>
+            )}
+            {response.result_quality && (
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">Chất lượng kết quả (Result Quality):</span>
+                <pre className="bg-slate-50 dark:bg-slate-900 p-1.5 rounded font-mono overflow-auto max-h-40">{JSON.stringify(response.result_quality, null, 2)}</pre>
+              </div>
+            )}
+            {response.warnings && response.warnings.length > 0 && (
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold text-red-700 dark:text-red-400">Cảnh báo (Warnings):</span>
+                <ul className="list-disc pl-4 space-y-0.5 text-red-600 dark:text-red-400">
+                  {response.warnings.map((w, idx) => <li key={idx}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
         </details>
       </div>
     </article>
@@ -439,6 +533,106 @@ function AnswerCardRenderer({
   );
 }
 
+function InsufficientResultCard({
+  response,
+  onRetry,
+  onAskQuestion,
+  onOpenMapping,
+}: {
+  response: AgentResponse;
+  rows: RecordRow[];
+  onRetry: () => void;
+  onAskQuestion: (question: string) => void;
+  onOpenMapping?: () => void;
+}) {
+  const quality = response.result_quality;
+  const card = response.answer_card;
+  const suggested = card?.recommended_next_questions?.length
+    ? card.recommended_next_questions
+    : ["Hãy tổng quan dataset này trước.", "Metric chính bạn muốn phân tích là gì?", "Bạn muốn breakdown theo cột nào?"];
+
+  return (
+    <div className="answer-card-v2 border-amber-200 dark:border-amber-900/60 bg-amber-50/40 dark:bg-amber-950/10">
+      <section className="answer-card-hero">
+        <div>
+          <span>Trạng thái phân tích</span>
+          <h3>{card?.headline || "Chưa đủ dữ liệu để kết luận"}</h3>
+          <p>{card?.summary || "Công cụ đã chạy nhưng output chưa có metric, bảng hoặc nhóm nổi bật đủ rõ để tạo insight đáng tin."}</p>
+        </div>
+        <div className="answer-confidence is-low">
+          <AlertTriangle size={13} />
+          Cần kiểm tra thêm
+        </div>
+      </section>
+
+      <section className="answer-evidence-grid">
+        <div className="answer-evidence-card">
+          <span>Công cụ đã chạy</span>
+          <strong>{humanizeToolName(response.tool_call?.tool_name || response.tool_calls?.[0]?.tool_name || "none")}</strong>
+          <p>Copilot không suy diễn số liệu khi tool result chưa đủ rõ.</p>
+        </div>
+        <div className="answer-evidence-card">
+          <span>Lý do</span>
+          <strong>{quality?.status === "empty" ? "Output rỗng" : quality?.status === "tool_error" ? "Tool lỗi" : "Evidence yếu"}</strong>
+          <p>{quality?.reason || "Không tìm thấy metric/top item usable trong kết quả."}</p>
+        </div>
+        <div className="answer-evidence-card">
+          <span>Số dòng usable</span>
+          <strong>{quality?.row_count ?? response.result_summary?.row_count ?? 0}</strong>
+          <p>Không render KPI/chart giả nếu kết quả không đủ cấu trúc.</p>
+        </div>
+      </section>
+
+      <section className="answer-takeaways">
+        <div className="answer-takeaway is-warning">
+          <span>Không bịa insight</span>
+          <p>Không có metric hoặc bảng rõ thì câu trả lời phải nói thật là chưa đủ cơ sở.</p>
+        </div>
+        <div className="answer-takeaway is-neutral">
+          <span>Cách sửa nhanh</span>
+          <p>Hỏi lại với metric và dimension cụ thể, hoặc chỉnh semantic mapping/data dictionary nếu cột bị hiểu sai.</p>
+        </div>
+      </section>
+
+      {quality?.warnings?.length ? (
+        <div className="copilot-warning-stack">
+          {quality.warnings.map((warning) => (
+            <div key={warning} className="copilot-warning">
+              <AlertTriangle size={13} />
+              <span>{warning}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <section className="answer-next-questions">
+        <span>Nên hỏi tiếp</span>
+        <div>
+          {suggested.slice(0, 4).map((question) => (
+            <button key={question} onClick={() => onAskQuestion(question)}>
+              <MessageSquarePlus size={13} />
+              {question}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className="copilot-actions">
+        <button onClick={onRetry}>
+          <RefreshCw size={13} />
+          Thử lại
+        </button>
+        {onOpenMapping && (
+          <button onClick={onOpenMapping}>
+            <Wand2 size={13} />
+            Mở semantic mapping
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ResultRenderer({
   rows,
   kpis,
@@ -531,9 +725,12 @@ function TrustBadges({ response, status }: { response: AgentResponse; status: Ch
   const { t } = useI18n();
   const source = response.explanation_source || (status === "pending" ? "running" : "tool_result");
   const totalMs = response.latency?.total_ms;
-  const cache = inferCacheState(response.cache, t);
+
+  const semCache = response.cache?.semantic_cache;
+  const toolCache = response.cache?.tool_result_cache;
+
   return (
-    <div className="copilot-trust-badges">
+    <div className="copilot-trust-badges flex flex-wrap items-center gap-1.5">
       <span>
         <ShieldCheck size={12} />
         {t.ask.basedOnTool}
@@ -543,7 +740,57 @@ function TrustBadges({ response, status }: { response: AgentResponse; status: Ch
         {typeof totalMs === "number" ? `${Math.round(totalMs)}ms` : t.ask.latencyPending}
       </span>
       <span>{translateSource(source, t)}</span>
-      {cache && <span>{cache}</span>}
+
+      {/* Semantic Cache Badge */}
+      {semCache && (
+        <span
+          className={`group relative cursor-help inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${
+            semCache.status === "hit"
+              ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/50"
+              : semCache.status === "miss"
+              ? "bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700/50"
+              : semCache.status === "skipped"
+              ? "bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/50"
+              : "bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/50"
+          }`}
+        >
+          Semantic Cache: {semCache.status.toUpperCase()}
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 rounded bg-slate-900 text-white text-[10px] p-2 shadow-lg w-48 whitespace-normal font-sans leading-normal">
+            <div className="font-bold mb-0.5">Semantic Cache</div>
+            <div>Trạng thái: <span className="font-bold">{semCache.status}</span></div>
+            {semCache.similarity !== null && semCache.similarity !== undefined && (
+              <div>Độ tương đồng: <span className="font-bold">{(semCache.similarity * 100).toFixed(0)}%</span></div>
+            )}
+            {semCache.reason && <div className="mt-1 text-slate-300 italic">{semCache.reason}</div>}
+          </div>
+        </span>
+      )}
+
+      {/* Tool Result Cache Badge */}
+      {toolCache && (
+        <span
+          className={`group relative cursor-help inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${
+            toolCache.status === "hit"
+              ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/50"
+              : toolCache.status === "miss"
+              ? "bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700/50"
+              : toolCache.status === "skipped"
+              ? "bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/50"
+              : "bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/50"
+          }`}
+        >
+          Tool Cache: {toolCache.status.toUpperCase()}
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 rounded bg-slate-900 text-white text-[10px] p-2 shadow-lg w-48 whitespace-normal font-sans leading-normal">
+            <div className="font-bold mb-0.5">Tool Result Cache</div>
+            <div>Trạng thái: <span className="font-bold">{toolCache.status}</span></div>
+            <div className="mt-1 text-slate-300 italic">
+              {toolCache.status === "hit"
+                ? "Kết quả truy vấn công cụ được tái sử dụng từ cache để tối ưu tốc độ."
+                : "Không tìm thấy kết quả công cụ tương ứng trong cache, đã tính toán mới."}
+            </div>
+          </div>
+        </span>
+      )}
     </div>
   );
 }
@@ -624,46 +871,116 @@ function ErrorBubble({
   type,
   answer,
   onRetry,
+  onOpenMapping,
 }: {
   type: ReturnType<typeof classifyError>;
   answer: string;
   onRetry: () => void;
+  onOpenMapping?: () => void;
 }) {
   const { t } = useI18n();
-  const copy = {
+
+  const copyMap: Record<
+    ReturnType<typeof classifyError>,
+    { title: string; body: string; diagnostic: string; actionText?: string; actionType?: "mapping" | "retry" | "fallback" }
+  > = {
     backend: {
-      title: "Chưa kết nối được backend",
-      body: "FastAPI có thể chưa chạy, sai port, hoặc bị CORS/network chặn. Hãy kiểm tra backend 8000 rồi retry.",
+      title: "Không thể kết nối đến máy chủ",
+      body: "Hệ thống không thể kết nối đến backend FastAPI. Vui lòng kiểm tra xem backend đã chạy ở cổng 8000 chưa.",
+      diagnostic: "Lỗi: BACKEND_UNREACHABLE",
     },
     ollama: {
-      title: "Ollama chưa sẵn sàng",
-      body: "Copilot vẫn có deterministic fallback, nhưng phần giải thích LLM có thể không chạy cho tới khi Ollama/model hoạt động.",
+      title: "Dịch vụ LLM (Ollama) ngoại tuyến hoặc lỗi tải mô hình",
+      body: "Mô hình ngôn ngữ Ollama chưa sẵn sàng. Bạn có thể sử dụng chế độ phân tích deterministic (không cần LLM giải thích).",
+      diagnostic: "Lỗi: OLLAMA_OFFLINE",
+      actionText: "Sử dụng fallback deterministic",
+      actionType: "fallback",
+    },
+    timeout: {
+      title: "Yêu cầu xử lý quá thời gian",
+      body: "Thời gian xử lý câu hỏi vượt quá giới hạn. Hãy thử lại hoặc đặt câu hỏi đơn giản hơn.",
+      diagnostic: "Lỗi: REQUEST_TIMEOUT",
     },
     mapping: {
-      title: "Thiếu mapping dữ liệu",
-      body: "Câu hỏi cần semantic role chưa chắc chắn. Hãy chỉnh Data Dictionary hoặc Semantic Mapping rồi hỏi lại.",
+      title: "Thiếu mapping vai trò ngữ nghĩa (Semantic mapping)",
+      body: "Không tìm thấy các vai trò cột cần thiết (như date, target, revenue...) để trả lời câu hỏi này. Vui lòng cấu hình lại mapping.",
+      diagnostic: "Lỗi: MISSING_SEMANTIC_MAPPING",
+      actionText: "Mở Semantic Mapping Studio",
+      actionType: "mapping",
+    },
+    invalid_args: {
+      title: "Đối số công cụ phân tích không hợp lệ",
+      body: "Agent truyền sai tên cột hoặc đối số khi chạy công cụ. Hãy kiểm tra Data Dictionary và kiểu dữ liệu của các cột.",
+      diagnostic: "Lỗi: INVALID_TOOL_ARGUMENTS",
+      actionText: "Kiểm tra Data Dictionary",
+      actionType: "mapping",
+    },
+    incompatible: {
+      title: "Dữ liệu không tương thích với phân tích yêu cầu",
+      body: "Cột dữ liệu được chọn không khớp với yêu cầu của thuật toán (ví dụ: phân tích xu hướng thời gian nhưng cột date chứa null hoặc sai định dạng).",
+      diagnostic: "Lỗi: DATASET_INCOMPATIBLE",
+      actionText: "Kiểm tra kiểu dữ liệu",
+      actionType: "mapping",
     },
     unclear: {
-      title: "Câu hỏi chưa đủ rõ",
-      body: "Hãy nêu metric và dimension cụ thể hơn, ví dụ: doanh thu theo category hoặc attrition theo department.",
+      title: "Câu hỏi chưa rõ ràng hoặc mơ hồ",
+      body: "Agent không xác định được metric hoặc nhóm bạn muốn phân tích. Hãy sử dụng các mẫu câu hỏi gợi ý bên dưới.",
+      diagnostic: "Lỗi: UNCLEAR_QUESTION",
     },
     generic: {
-      title: "Agent chưa chạy thành công",
-      body: answer || "Có lỗi khi chạy analysis tool. Bạn có thể retry hoặc hỏi theo cách cụ thể hơn.",
+      title: "Gặp sự cố khi chạy phân tích dữ liệu",
+      body: answer || "Đã xảy ra lỗi không xác định trong quá trình thực thi công cụ phân tích dữ liệu.",
+      diagnostic: "Lỗi: GENERIC_EXECUTION_FAILURE",
     },
-  }[type];
+  };
+
+  const copy = copyMap[type] || copyMap.generic;
 
   return (
-    <div className="copilot-error-card">
-      <AlertTriangle size={18} />
-      <div>
-        <strong>{copy.title}</strong>
-        <p>{copy.body}</p>
-        {answer && <small>{answer}</small>}
-        <button onClick={onRetry}>
-          <RefreshCw size={12} />
-          {t.ask.retryFallback}
-        </button>
+    <div className="copilot-error-card p-4 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-950/10 flex gap-3 text-sm">
+      <AlertTriangle className="text-red-500 shrink-0" size={20} />
+      <div className="space-y-2.5 flex-1">
+        <div>
+          <div className="text-xs font-mono font-semibold text-red-600 dark:text-red-400 mb-0.5">
+            {copy.diagnostic}
+          </div>
+          <strong className="text-slate-900 dark:text-slate-100 font-bold">{copy.title}</strong>
+          <p className="text-slate-600 dark:text-slate-300 text-xs mt-1 leading-relaxed">{copy.body}</p>
+        </div>
+
+        {answer && type !== "generic" && (
+          <div className="bg-white dark:bg-slate-950 p-2 rounded border border-red-100 dark:border-red-900/30 text-xs font-mono text-slate-500 max-h-24 overflow-auto">
+            {answer}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            onClick={onRetry}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all"
+          >
+            <RefreshCw size={12} />
+            Thử lại câu hỏi
+          </button>
+
+          {copy.actionType === "mapping" && onOpenMapping && (
+            <button
+              onClick={onOpenMapping}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-950 text-white dark:bg-slate-700 dark:hover:bg-slate-600 rounded-lg text-xs font-semibold transition-all"
+            >
+              {copy.actionText}
+            </button>
+          )}
+
+          {copy.actionType === "fallback" && (
+            <button
+              onClick={onRetry}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold transition-all"
+            >
+              {copy.actionText}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -729,6 +1046,7 @@ function extractRows(response: AgentResponse): RecordRow[] {
       return candidate.filter(isRecord).slice(0, 50);
     }
     if (isRecord(candidate)) {
+      if (Array.isArray(candidate.result)) return candidate.result.filter(isRecord).slice(0, 50);
       const nested = Object.values(candidate).find(Array.isArray);
       if (Array.isArray(nested)) return nested.filter(isRecord).slice(0, 50);
       if (candidate.items && Array.isArray(candidate.items)) return candidate.items.filter(isRecord).slice(0, 50);
@@ -741,10 +1059,23 @@ function extractRows(response: AgentResponse): RecordRow[] {
 function extractKpis(response: AgentResponse) {
   const source = response.tool_call?.result ?? response.data;
   if (!isRecord(source) || Array.isArray(source)) return [];
+  if (isRecord(source.metrics) && Object.keys(source.metrics).length > 0) {
+    return Object.entries(source.metrics)
+      .filter(([, value]) => typeof value === "number" || typeof value === "string" || typeof value === "boolean")
+      .slice(0, 8)
+      .map(([label, value]) => ({ label, value: formatUnknown(value) }));
+  }
   return Object.entries(source)
     .filter(([, value]) => typeof value === "number" || typeof value === "string" || typeof value === "boolean")
     .slice(0, 8)
     .map(([label, value]) => ({ label, value: formatUnknown(value) }));
+}
+
+function isWeakResultQuality(response: AgentResponse) {
+  const quality = response.result_quality;
+  if (!quality) return false;
+  if (quality.status === "empty" || quality.status === "insufficient" || quality.status === "tool_error") return true;
+  return quality.status === "partial" && (!quality.has_metric || !quality.has_label);
 }
 
 function normalizeQuickActions(
@@ -775,12 +1106,29 @@ function actionIcon(action: QuickAction["action"]) {
   return Info;
 }
 
-function classifyError(response: AgentResponse): "backend" | "ollama" | "mapping" | "unclear" | "generic" {
-  const text = `${response.answer} ${response.warnings.join(" ")} ${response.tool_call?.error ?? ""}`.toLowerCase();
-  if (text.includes("failed to fetch") || text.includes("backend") || text.includes("network")) return "backend";
-  if (text.includes("ollama") || text.includes("model") || text.includes("timeout")) return "ollama";
-  if (text.includes("mapping") || text.includes("semantic") || text.includes("missing role")) return "mapping";
-  if (text.includes("unclear") || text.includes("rephrase") || text.includes("cụ thể")) return "unclear";
+function classifyError(response: AgentResponse): "backend" | "ollama" | "timeout" | "mapping" | "invalid_args" | "incompatible" | "unclear" | "generic" {
+  const text = `${response.answer || ""} ${(response.warnings || []).join(" ")} ${response.tool_call?.error ?? ""}`.toLowerCase();
+  if (text.includes("failed to fetch") || text.includes("backend") || text.includes("network") || text.includes("cannot reach backend")) {
+    return "backend";
+  }
+  if (text.includes("timeout") || text.includes("gateway") || text.includes("quá thời gian")) {
+    return "timeout";
+  }
+  if (text.includes("ollama") || text.includes("ollama unavailable") || text.includes("connection refused") || text.includes("model not loaded")) {
+    return "ollama";
+  }
+  if (text.includes("mapping") || text.includes("semantic") || text.includes("missing role")) {
+    return "mapping";
+  }
+  if (text.includes("column") || text.includes("arguments") || text.includes("invalid column") || text.includes("đối số không hợp lệ")) {
+    return "invalid_args";
+  }
+  if (text.includes("incompatible") || text.includes("không tương thích") || text.includes("not supported")) {
+    return "incompatible";
+  }
+  if (text.includes("unclear") || text.includes("rephrase") || text.includes("cụ thể") || text.includes("không rõ")) {
+    return "unclear";
+  }
   return "generic";
 }
 
@@ -964,4 +1312,165 @@ function formatUnknown(value: unknown) {
   if (typeof value === "boolean") return value ? "Có" : "Không";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function renderInline(tokens: any[]): React.ReactNode[] {
+  if (!tokens) return [];
+  return tokens.map((token: any, i: number) => {
+    switch (token.type) {
+      case "strong":
+        return <strong key={i}>{token.text}</strong>;
+      case "em":
+        return <em key={i}>{token.text}</em>;
+      case "codespan":
+        return <code key={i} className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-xs">{token.text}</code>;
+      case "link":
+        return (
+          <a key={i} href={token.href} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">
+            {token.text}
+          </a>
+        );
+      case "text":
+      default:
+        return token.text;
+    }
+  });
+}
+
+export function MarkdownAnswerRenderer({ markdown }: { markdown: string }) {
+  if (!markdown) return null;
+  const tokens = marked.lexer(markdown);
+
+  return (
+    <div className="markdown-answer space-y-3 text-slate-700 dark:text-slate-200">
+      {tokens.map((token: any, index: number) => {
+        switch (token.type) {
+          case "heading": {
+            const Tag = `h${Math.min(token.depth + 1, 6)}` as keyof JSX.IntrinsicElements;
+            return (
+              <Tag key={index} className="font-bold text-slate-800 dark:text-slate-100 mt-4 mb-2">
+                {renderInline(token.tokens)}
+              </Tag>
+            );
+          }
+          case "paragraph":
+            return (
+              <p key={index} className="text-slate-600 dark:text-slate-300 leading-relaxed my-2">
+                {renderInline(token.tokens)}
+              </p>
+            );
+          case "list": {
+            const Tag = token.ordered ? "ol" : "ul";
+            return (
+              <Tag key={index} className={`list-outside pl-5 my-2 space-y-1 ${token.ordered ? "list-decimal" : "list-disc"}`}>
+                {token.items.map((item: any, i: number) => (
+                  <li key={i} className="text-slate-600 dark:text-slate-300">
+                    {renderInline(item.tokens)}
+                  </li>
+                ))}
+              </Tag>
+            );
+          }
+          case "space":
+            return <div key={index} className="h-2" />;
+          default:
+            return (
+              <div key={index} className="my-2">
+                {token.text}
+              </div>
+            );
+        }
+      })}
+    </div>
+  );
+}
+
+function isMarkdown(text: string): boolean {
+  return /[\*\#\_\[\]]/.test(text) || /\n\s*[-*+]\s+/.test(text) || /\n\s*\d+\.\s+/.test(text);
+}
+
+function buildSuggestedQuestions(
+  dashboard: DashboardResponse | null,
+  semanticProfile: SemanticProfile | null,
+  t: any
+): { questions: string[]; reason: string } {
+  const domain = dashboard?.domain || "generic";
+  const roles = semanticProfile?.roles || {};
+  const activeRoles = Object.entries(roles)
+    .filter(([, col]) => Boolean(col))
+    .map(([role]) => role);
+
+  const roleText = activeRoles.length > 0 ? ` và roles: ${activeRoles.join(", ")}` : "";
+  const reason = `Gợi ý dựa trên domain: ${domain.toUpperCase()}${roleText}`;
+
+  // Heuristics for filters based on active semantic roles:
+  const hasRole = (role: string) => Boolean(roles[role]);
+
+  let questions: string[] = [];
+
+  switch (domain) {
+    case "ecommerce":
+      questions = [
+        "SKU nào có doanh thu cao nhất?",
+        "Category nào có tỷ lệ hủy cao?",
+        "State nào doanh thu cao nhưng rủi ro hủy cũng cao?",
+      ];
+      break;
+    case "retail":
+      questions = [
+        hasRole("revenue") && hasRole("profit") ? "Category nào sales cao nhưng profit thấp?" : "",
+        "Segment nào có margin tốt nhất?",
+        hasRole("profit") ? "Discount ảnh hưởng profit thế nào?" : "",
+      ].filter(Boolean);
+      break;
+    case "marketing":
+      questions = [
+        "Campaign nào response tốt nhất?",
+        "Response rate theo income band ra sao?",
+        "Kênh mua hàng nào hiệu quả nhất?",
+      ];
+      break;
+    case "hr":
+      questions = [
+        "Nhóm nào attrition risk cao?",
+        hasRole("department") ? "Attrition theo overtime và department thế nào?" : "",
+        hasRole("salary") ? "Income band nào có attrition rate cao?" : "",
+      ].filter(Boolean);
+      break;
+    case "logistics":
+      questions = [
+        "Khu vực nào có số lượng sự kiện cao nhất?",
+        hasRole("date") ? "Xu hướng theo tháng thay đổi thế nào?" : "",
+        "Vehicle/transit mode nào nổi bật nhất?",
+      ];
+      break;
+    case "finance":
+      questions = [
+        hasRole("date") ? "Profit/margin theo thời gian thế nào?" : "",
+        hasRole("revenue") ? "Nhóm nào revenue cao nhưng margin thấp?" : "",
+      ].filter(Boolean);
+      break;
+    default:
+      questions = [];
+  }
+
+  // Fallback to generic/standard questions
+  const genericQuestions = [
+    "Cột nào thiếu dữ liệu nhiều nhất?",
+    "Dataset này có duplicate rows không?",
+    "Các cột numeric tương quan mạnh nhất là gì?",
+  ];
+
+  if (questions.length === 0) {
+    questions = genericQuestions;
+  } else {
+    // Fill up to at least 3 questions if needed
+    while (questions.length < 3) {
+      const nextGen = genericQuestions.find(q => !questions.includes(q));
+      if (!nextGen) break;
+      questions.push(nextGen);
+    }
+  }
+
+  return { questions: questions.slice(0, 5), reason };
 }

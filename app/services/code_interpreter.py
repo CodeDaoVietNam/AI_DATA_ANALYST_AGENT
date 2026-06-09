@@ -44,6 +44,21 @@ _SAFE_BUILTINS: dict[str, Any] = {
 }
 
 
+def _empty_payload(success: bool, error: str | None = None, stdout: str = "", warning: str | None = None) -> dict[str, Any]:
+    warnings = [warning] if warning else []
+    return {
+        "success": success,
+        "error": error,
+        "stdout": stdout,
+        "result": None,
+        "result_type": "empty",
+        "row_count": 0,
+        "columns": [],
+        "metrics": {},
+        "warnings": warnings,
+    }
+
+
 # ── Multi-file lazy loader ────────────────────────────────────────────────────
 
 class LazyDataFrameDict(dict):
@@ -119,21 +134,80 @@ def _execute_in_subprocess(
         result_val = local_vars.get("result")
 
         if isinstance(result_val, _pd.DataFrame):
-            result_val = (
-                result_val.head(MAX_RESULT_ROWS)
+            limited = result_val.head(MAX_RESULT_ROWS)
+            rows = (
+                limited
                 .astype(object)
-                .where(_pd.notna(result_val.head(MAX_RESULT_ROWS)), None)
+                .where(_pd.notna(limited), None)
                 .to_dict(orient="records")
             )
+            return {
+                "success": True,
+                "error": None,
+                "stdout": stdout_out,
+                "result": rows,
+                "result_type": "dataframe",
+                "row_count": len(rows),
+                "columns": list(result_val.columns),
+                "metrics": _metrics_from_rows(rows),
+                "warnings": [],
+            }
         elif isinstance(result_val, _pd.Series):
-            result_val = result_val.head(MAX_RESULT_ROWS).to_dict()
+            series = result_val.head(MAX_RESULT_ROWS)
+            raw_dict = series.to_dict()
+            rows = [
+                {"label": str(index), "value": _json_safe(value)}
+                for index, value in raw_dict.items()
+            ]
+            return {
+                "success": True,
+                "error": None,
+                "stdout": stdout_out,
+                "result": rows,
+                "result_type": "series",
+                "row_count": len(rows),
+                "columns": ["label", "value"],
+                "metrics": _metrics_from_rows(rows),
+                "warnings": [],
+            }
+        if result_val is None:
+            if stdout_out.strip():
+                return {
+                    "success": True,
+                    "error": None,
+                    "stdout": stdout_out,
+                    "result": stdout_out,
+                    "result_type": "text",
+                    "row_count": None,
+                    "columns": [],
+                    "metrics": {},
+                    "warnings": ["Code chỉ in stdout, không set biến `result`; kết quả có thể khó render thành insight."],
+                }
+            return {
+                "success": True,
+                "error": None,
+                "stdout": stdout_out,
+                "result": None,
+                "result_type": "empty",
+                "row_count": 0,
+                "columns": [],
+                "metrics": {},
+                "warnings": ["Code ran successfully but did not assign `result` or print output."],
+            }
 
+        result_type = _result_type(result_val)
         return {
             "success": True,
             "error": None,
             "stdout": stdout_out,
-            "result": result_val if result_val is not None else stdout_out,
+            "result": _json_safe(result_val),
+            "result_type": result_type,
+            "row_count": _row_count_for_value(result_val),
+            "columns": list(result_val.keys()) if isinstance(result_val, dict) else [],
+            "metrics": _metrics_from_value(result_val),
+            "warnings": [],
         }
+
     except Exception as exc:
         return {
             "success": False,
@@ -141,6 +215,11 @@ def _execute_in_subprocess(
             "traceback": _tb.format_exc(),
             "stdout": stdout_buf.getvalue(),
             "result": None,
+            "result_type": "empty",
+            "row_count": 0,
+            "columns": [],
+            "metrics": {},
+            "warnings": [str(exc)],
         }
 
 
@@ -161,6 +240,11 @@ def execute_pandas_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
                 "error": f"Security Block: unsafe keyword '{keyword}' is not allowed.",
                 "stdout": "",
                 "result": None,
+                "result_type": "empty",
+                "row_count": 0,
+                "columns": [],
+                "metrics": {},
+                "warnings": [f"Unsafe keyword blocked: {keyword}"],
             }
 
     # 2. Submit to isolated process
@@ -188,6 +272,11 @@ def execute_pandas_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
                     "error": f"Execution timed out after {MAX_EXEC_SECONDS} seconds.",
                     "stdout": "",
                     "result": None,
+                    "result_type": "empty",
+                    "row_count": 0,
+                    "columns": [],
+                    "metrics": {},
+                    "warnings": [f"Execution timed out after {MAX_EXEC_SECONDS} seconds."],
                 }
     except Exception as exc:
         return {
@@ -196,4 +285,68 @@ def execute_pandas_code(df: pd.DataFrame, code: str) -> dict[str, Any]:
             "traceback": traceback.format_exc(),
             "stdout": "",
             "result": None,
+            "result_type": "empty",
+            "row_count": 0,
+            "columns": [],
+            "metrics": {},
+            "warnings": [f"Process execution error: {exc}"],
         }
+
+
+def _json_safe(value: Any) -> Any:
+    if pd.isna(value) if not isinstance(value, (list, tuple, dict)) else False:
+        return None
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            pass
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _result_type(value: Any) -> str:
+    if isinstance(value, dict):
+        return "dict"
+    if isinstance(value, (int, float, bool)):
+        return "scalar"
+    if isinstance(value, str):
+        return "text" if value.strip() else "empty"
+    if isinstance(value, list):
+        return "list"
+    return type(value).__name__
+
+
+def _row_count_for_value(value: Any) -> int | None:
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, dict):
+        rows = value.get("rows") or value.get("items")
+        return len(rows) if isinstance(rows, list) else None
+    return None
+
+
+def _metrics_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {}
+    first = rows[0]
+    return {
+        key: _json_safe(value)
+        for key, value in first.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+
+
+def _metrics_from_value(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe(item)
+            for key, item in value.items()
+            if isinstance(item, (int, float)) and not isinstance(item, bool)
+        }
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return {"value": value}
+    return {}

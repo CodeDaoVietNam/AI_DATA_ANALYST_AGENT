@@ -25,6 +25,7 @@ import {
   Megaphone,
   Store,
   Users,
+  Menu,
 } from "lucide-react";
 import {
   askAgent,
@@ -63,8 +64,19 @@ import {
   type WorkspaceDataset,
 } from "./api";
 import { AskCopilot, type ChatEntry } from "./components/AskCopilot";
+import { UploadSection } from "./components/UploadSection";
+import { SemanticMappingSummary } from "./components/SemanticMappingSummary";
+import { AdvancedDataControls } from "./components/AdvancedDataControls";
 import { useI18n, type Language } from "./i18n";
 import type { AgentResponse, AgentStatus, DashboardResponse, DataDictionary, DataDictionaryResponse, EcommerceOverview, MetricDefinition, MetricEvaluationResponse, RecordRow, Section, SemanticProfile, SummaryResponse, SummaryWrapper, UploadResponse } from "./types";
+
+import { useDatasetWorkspace } from "./hooks/useDatasetWorkspace";
+import { useDashboardData } from "./hooks/useDashboardData";
+import { useEcommerceData } from "./hooks/useEcommerceData";
+import { useCopilotChat } from "./hooks/useCopilotChat";
+import { useMetrics } from "./hooks/useMetrics";
+import { useDataDictionary } from "./hooks/useDataDictionary";
+import { useSemanticMapping } from "./hooks/useSemanticMapping";
 
 const Plot = lazy(() => import("react-plotly.js"));
 
@@ -85,58 +97,137 @@ type DashboardInsight = {
 export default function App() {
   const { t, language, setLanguage } = useI18n();
   const [section, setSection] = useState<Section>("upload");
-  const [upload, setUpload] = useState<UploadResponse | null>(null);
-  const [summary, setSummary] = useState<SummaryResponse | null>(null);
-  const [ecommerce, setEcommerce] = useState<EcommerceOverview | null>(null);
-  const [smartDashboard, setSmartDashboard] = useState<DashboardResponse | null>(null);
-  const [dataDictionary, setDataDictionary] = useState<DataDictionaryResponse | null>(null);
-  const [customMetrics, setCustomMetrics] = useState<MetricDefinition[]>([]);
-  const [categoryRows, setCategoryRows] = useState<RecordRow[]>([]);
-  const [monthRows, setMonthRows] = useState<RecordRow[]>([]);
-  const [stateRows, setStateRows] = useState<RecordRow[]>([]);
-  const [skuRows, setSkuRows] = useState<RecordRow[]>([]);
-  const [sizeRows, setSizeRows] = useState<RecordRow[]>([]);
-  const [categoryRiskRows, setCategoryRiskRows] = useState<RecordRow[]>([]);
-  const [fulfilmentRows, setFulfilmentRows] = useState<RecordRow[]>([]);
-  const [courierRows, setCourierRows] = useState<RecordRow[]>([]);
-  const [promotionSummary, setPromotionSummary] = useState<SummaryWrapper["summary"] | null>(null);
-  const [b2bSummary, setB2bSummary] = useState<SummaryWrapper["summary"] | null>(null);
-  const [cityRows, setCityRows] = useState<RecordRow[]>([]);
-  const [stateRiskRows, setStateRiskRows] = useState<RecordRow[]>([]);
+  const [dashboardSubTab, setDashboardSubTab] = useState<"kpis" | "charts" | "ecommerce">("kpis");
+  const [profileSubTab, setProfileSubTab] = useState<"overview" | "quality">("overview");
+
+  // Destructure hook properties
+  const workspace = useDatasetWorkspace();
+  const dashboard = useDashboardData();
+  const ecommerceData = useEcommerceData();
+  const copilot = useCopilotChat();
+  const metrics = useMetrics();
+  const dictionary = useDataDictionary();
+  const semantic = useSemanticMapping();
+
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 1024);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Alias original variable names to avoid breaking existing JSX and handlers
+  const {
+    upload,
+    setUpload,
+    summary,
+    setSummary,
+    availableDatasets,
+    setAvailableDatasets,
+    agentStatus,
+    setAgentStatus,
+    loading,
+    setLoading,
+    error,
+    setError,
+    datasetId,
+    columns,
+    uploadProgress,
+    uploadPhase,
+    selectedFileMeta,
+    cancelUpload,
+    handleUpload: workspaceUpload,
+    handleSelectDataset: workspaceSelectDataset,
+  } = workspace;
+
+  const {
+    smartDashboard,
+    setSmartDashboard,
+  } = dashboard;
+
+  const {
+    ecommerce,
+    categoryRows,
+    monthRows,
+    stateRows,
+    skuRows,
+    sizeRows,
+    categoryRiskRows,
+    fulfilmentRows,
+    courierRows,
+    promotionSummary,
+    b2bSummary,
+    cityRows,
+    stateRiskRows,
+    fetchEcommerceData,
+    resetEcommerceData,
+  } = ecommerceData;
+
+  const {
+    chatHistory,
+    setChatHistory,
+    questionDraft,
+    setQuestionDraft,
+  } = copilot;
+
+  const {
+    customMetrics,
+    setCustomMetrics,
+  } = metrics;
+
+  const {
+    dataDictionary,
+    setDataDictionary,
+  } = dictionary;
+
   const [chart, setChart] = useState<{ data: unknown[]; layout: Record<string, unknown> } | null>(null);
-  const [chatHistory, setChatHistory] = useState<ChatEntry[]>([]);
   const [report, setReport] = useState("");
-  const [loading, setLoading] = useState("");
-  const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [availableDatasets, setAvailableDatasets] = useState<WorkspaceDataset[]>([]);
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
-  const [questionDraft, setQuestionDraft] = useState("");
 
-  const datasetId = upload?.dataset_id;
-
-  const columns = summary?.columns ?? [];
-  const navItems: Array<{ id: Section; label: string; icon: typeof Upload }> = useMemo(() => [
-    { id: "upload", label: t.nav.upload, icon: Upload },
-    { id: "overview", label: t.nav.overview, icon: Database },
-    { id: "quality", label: t.nav.quality, icon: AlertTriangle },
+  const navItems: Array<{ id: Section; label: string; icon: typeof Upload; badge?: string }> = useMemo(() => [
+    { id: "upload",    label: t.nav.upload,    icon: Upload },
+    { id: "profile",   label: t.nav.profile ?? "Data Profile",   icon: Database },
     { id: "dashboard", label: t.nav.dashboard, icon: Activity },
-    { id: "ecommerce", label: t.nav.ecommerce, icon: BarChart3 },
-    { id: "charts", label: t.nav.charts, icon: LineChart },
-    { id: "ask", label: t.nav.ask, icon: Bot },
-    { id: "report", label: t.nav.report, icon: FileText },
+    { id: "ask",       label: t.nav.ask,       icon: Bot },
+    { id: "report",    label: t.nav.report,    icon: FileText },
   ], [t]);
   const sectionMeta = t.sections;
 
-  async function refreshDataset(nextUpload: UploadResponse) {
-    setLoading(t.app.messages.parsingDataset);
+  // Fix 1.2: reset section when domain changes to avoid blank screen
+  useEffect(() => {
+    const validSections: Section[] = ["upload", "profile", "dashboard", "ask", "report"];
+    if (!validSections.includes(section)) {
+      setSection("dashboard");
+    }
+  }, [smartDashboard?.domain, section]);
+
+  // Reset ecommerce sub-tab when domain is no longer ecommerce
+  useEffect(() => {
+    if (dashboardSubTab === "ecommerce" && smartDashboard?.domain !== "ecommerce") {
+      setDashboardSubTab("kpis");
+    }
+  }, [smartDashboard?.domain, dashboardSubTab]);
+
+  async function refreshDataset(
+    nextUpload: UploadResponse,
+    updatePhase?: (phase: "profiling" | "building" | "completed", progress: number) => void
+  ) {
+    if (!updatePhase) {
+      setLoading(t.app.messages.parsingDataset);
+    }
     setError("");
     setUpload(nextUpload);
     try {
+      if (updatePhase) updatePhase("profiling", 60);
       // 1. Fetch summary and dashboard contract first to determine domain
       const summaryData = await getSummary(nextUpload.dataset_id);
       setSummary(summaryData);
 
+      if (updatePhase) updatePhase("building", 75);
       const dashboardData = await getDashboard(nextUpload.dataset_id).catch(() => null);
       setSmartDashboard(dashboardData);
       const dictionaryData = await getDataDictionary(nextUpload.dataset_id).catch(() => null);
@@ -146,106 +237,33 @@ export default function App() {
 
       // 2. Only fetch deep ecommerce endpoints if detected domain is "ecommerce"
       if (dashboardData && dashboardData.domain === "ecommerce") {
-        const [
-          ecommerceData,
-          categoryData,
-          monthData,
-          stateData,
-          skuData,
-          sizeData,
-          categoryRiskData,
-          fulfilmentData,
-          courierData,
-          promotionData,
-          b2bData,
-          cityData,
-          stateRiskData,
-        ] = await Promise.all([
-          getEcommerceOverview(nextUpload.dataset_id).catch(() => null),
-          getRevenueByCategory(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getRevenueByMonth(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getTopStates(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getTopSkus(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getRevenueBySize(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getCategoryCancellation(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getFulfilment(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getCourier(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getPromotion(nextUpload.dataset_id).catch(() => ({ summary: null })),
-          getB2B(nextUpload.dataset_id).catch(() => ({ summary: null })),
-          getTopCities(nextUpload.dataset_id).catch(() => ({ items: [] })),
-          getStateCancellation(nextUpload.dataset_id).catch(() => ({ items: [] })),
-        ]);
-
-        setEcommerce(ecommerceData);
-        setCategoryRows(categoryData.items);
-        setMonthRows(monthData.items);
-        setStateRows(stateData.items);
-        setSkuRows(skuData.items);
-        setSizeRows(sizeData.items);
-        setCategoryRiskRows(categoryRiskData.items);
-        setFulfilmentRows(fulfilmentData.items);
-        setCourierRows(courierData.items);
-        setPromotionSummary(promotionData.summary);
-        setB2bSummary(b2bData.summary);
-        setCityRows(cityData.items);
-        setStateRiskRows(stateRiskData.items);
+        if (updatePhase) updatePhase("building", 90);
+        await fetchEcommerceData(nextUpload.dataset_id);
       } else {
-        // Reset ecommerce states for non-ecommerce domains
-        setEcommerce(null);
-        setCategoryRows([]);
-        setMonthRows([]);
-        setStateRows([]);
-        setSkuRows([]);
-        setSizeRows([]);
-        setCategoryRiskRows([]);
-        setFulfilmentRows([]);
-        setCourierRows([]);
-        setPromotionSummary(null);
-        setB2bSummary(null);
-        setCityRows([]);
-        setStateRiskRows([]);
+        resetEcommerceData();
       }
 
-      setSection("overview");
+      setSection("profile");
     } catch (err) {
       setError(err instanceof Error ? err.message : t.app.messages.loadDetailsFailed);
+      throw err;
     } finally {
-      setLoading("");
+      if (!updatePhase) {
+        setLoading("");
+      }
     }
   }
 
   async function handleUpload(file: File) {
-    try {
-      setLoading(t.app.messages.uploadingData);
-      setError("");
-      const uploaded = await uploadCsv(file);
-      await refreshDataset(uploaded);
-      const { datasets } = await listDatasets();
-      setAvailableDatasets(datasets);
-    } catch (err) {
-      setLoading("");
-      setError(err instanceof Error ? err.message : t.app.messages.uploadFailed);
-    }
+    await workspaceUpload(file, async (uploaded, update) => {
+      await refreshDataset(uploaded, update);
+    });
   }
 
   async function handleSelectDataset(ds: WorkspaceDataset) {
-    try {
-      setLoading(`${t.app.messages.switchingWorkspace} ${ds.filename}...`);
-      setError("");
-      const mockUpload: UploadResponse = {
-        dataset_id: ds.dataset_id,
-        filename: ds.filename,
-        rows: 0,
-        columns: 0,
-        message: "Switched"
-      };
-      setUpload(mockUpload);
-      await refreshDataset(mockUpload);
-      setLoading("");
-    } catch (err) {
-      setLoading("");
-      setError(err instanceof Error ? err.message : t.app.messages.switchDatasetFailed);
-    }
+    await workspaceSelectDataset(ds, async (mockUpload, update) => {
+      await refreshDataset(mockUpload, update);
+    });
   }
 
   useEffect(() => {
@@ -318,22 +336,56 @@ export default function App() {
   async function submitQuestion(question: string) {
     if (!datasetId) return;
     if (!question.trim()) return;
+
     const chatId = crypto.randomUUID();
-    setChatHistory((prev) => [
-      ...prev,
-      {
-        id: chatId,
-        question,
-        status: "pending",
-        response: {
-          answer: "Đang chọn tool phù hợp và chạy phân tích deterministic...",
-          tool_call: null,
-          data: null,
-          chart: null,
-          warnings: [],
+
+    // Get current chat history before appending the new one
+    let currentHistory: any[] = [];
+    setChatHistory((prev) => {
+      currentHistory = prev;
+      return [
+        ...prev,
+        {
+          id: chatId,
+          question,
+          status: "pending",
+          response: {
+            answer: "Đang chọn tool phù hợp và chạy phân tích deterministic...",
+            tool_call: null,
+            data: null,
+            chart: null,
+            warnings: [],
+          },
         },
-      },
-    ]);
+      ];
+    });
+
+    const historyPayload = currentHistory
+      .slice(-5)
+      .flatMap((entry) => {
+        if (entry.status === "done") {
+          return [
+            { role: "user" as const, content: entry.question },
+            {
+              role: "assistant" as const,
+              content: entry.response.answer || "",
+              tool_name: entry.response.tool_call?.tool_name || null,
+              tool_result_summary: entry.response.result_summary || null,
+              answer_card: entry.response.answer_card || null,
+            }
+          ];
+        } else if (entry.status === "error") {
+          return [
+            { role: "user" as const, content: entry.question },
+            {
+              role: "assistant" as const,
+              content: entry.response.answer || "",
+            }
+          ];
+        }
+        return [];
+      });
+
     try {
       setLoading(t.app.messages.agentStreaming);
       setError("");
@@ -376,7 +428,7 @@ export default function App() {
             )
           );
         }
-      }).catch(async () => askAgent(datasetId, question));
+      }, historyPayload).catch(async () => askAgent(datasetId, question, historyPayload));
       setChatHistory((prev) =>
         prev.map((item) =>
           item.id === chatId ? { ...item, status: "done", response: result } : item
@@ -422,7 +474,8 @@ export default function App() {
     }
     if (action.action === "view_chart" && response.chart) {
       setChart(response.chart);
-      setSection("charts");
+      setSection("dashboard");
+      setDashboardSubTab("charts");
       return;
     }
     if (action.action === "add_to_report") {
@@ -623,9 +676,20 @@ export default function App() {
   return (
     <div className="min-h-screen overflow-x-hidden text-slate-800 font-sans antialiased" style={{background: '#f0f4f8'}}>
       <div className="workspace-grid pointer-events-none fixed inset-0 z-0" />
+
+      {/* Backdrop overlay */}
+      {!isDesktop && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm transition-opacity duration-300"
+        />
+      )}
+
       {/* ── Sidebar ───────────────────────────────────────────────── */}
       <aside
-        className="glass-sidebar fixed inset-y-0 left-0 z-30 flex flex-col"
+        className={`glass-sidebar fixed inset-y-0 left-0 z-50 flex flex-col transition-transform duration-300 ease-in-out ${
+          isDesktop ? "translate-x-0" : sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
         style={{ width: 'var(--sidebar-w)', padding: '18px 14px' }}
       >
         {/* Logo mark */}
@@ -664,17 +728,16 @@ export default function App() {
         {/* Nav */}
         <nav className="flex-1 space-y-0.5 overflow-y-auto">
           {navItems
-            .filter((item) => {
-              if (item.id === "ecommerce") return smartDashboard?.domain === "ecommerce";
-              return true;
-            })
             .map((item) => {
               const Icon = item.icon;
               const active = section === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => setSection(item.id)}
+                  onClick={() => {
+                    setSection(item.id);
+                    if (!isDesktop) setSidebarOpen(false);
+                  }}
                   className={`nav-item ${active ? 'active' : ''}`}
                 >
                   <span className="nav-icon">
@@ -708,35 +771,49 @@ export default function App() {
 
       {/* ── Main Workspace ─────────────────────────────────────────── */}
       <main
-        className="relative z-10 min-h-screen"
-        style={{ marginLeft: 'var(--sidebar-w)', padding: '20px 28px 40px' }}
+        className="relative z-10 min-h-screen transition-all duration-300"
+        style={{
+          marginLeft: isDesktop ? 'var(--sidebar-w)' : '0',
+          padding: isDesktop ? '20px 28px 40px' : '16px 16px 32px',
+        }}
       >
         {/* Page header */}
         <header className="glass-panel mb-6 rounded-[16px] px-6 py-5">
           <div className="flex items-start justify-between gap-6">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <span className="badge badge-slate">{currentSection.eyebrow}</span>
-                {agentStatus?.ollama_available
-                  ? <span className="badge badge-green"><span className="live-dot live-dot-green" style={{width:5,height:5,animation:'none'}} />{t.app.aiReady}</span>
-                  : <span className="badge badge-amber">{t.app.deterministic}</span>
-                }
-                {upload && <span className="badge badge-blue"><Database style={{width:9,height:9}} />{upload.filename}</span>}
-                {upload && (
-                  <span className="badge badge-slate">
-                    <Gauge style={{width:9,height:9}} />
-                    {upload.rows.toLocaleString()} {t.app.rows}
-                  </span>
-                )}
-                {smartDashboard?.domain && (
-                  <span className="badge badge-blue" style={{textTransform:'capitalize'}}>
-                    <Layers3 style={{width:9,height:9}} />
-                    {smartDashboard.domain}
-                  </span>
-                )}
+            <div className="flex items-start gap-3 min-w-0">
+              {!isDesktop && (
+                <button
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors shadow-sm shrink-0 mt-1"
+                  aria-label="Toggle sidebar"
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+              )}
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="badge badge-slate">{currentSection.eyebrow}</span>
+                  {agentStatus?.ollama_available
+                    ? <span className="badge badge-green"><span className="live-dot live-dot-green" style={{width:5,height:5,animation:'none'}} />{t.app.aiReady}</span>
+                    : <span className="badge badge-amber">{t.app.deterministic}</span>
+                  }
+                  {upload && <span className="badge badge-blue"><Database style={{width:9,height:9}} />{upload.filename}</span>}
+                  {upload && (
+                    <span className="badge badge-slate">
+                      <Gauge style={{width:9,height:9}} />
+                      {upload.rows.toLocaleString()} {t.app.rows}
+                    </span>
+                  )}
+                  {smartDashboard?.domain && (
+                    <span className="badge badge-blue" style={{textTransform:'capitalize'}}>
+                      <Layers3 style={{width:9,height:9}} />
+                      {smartDashboard.domain}
+                    </span>
+                  )}
+                </div>
+                <h1 className="text-2xl font-black tracking-tight text-slate-950">{currentSection.title}</h1>
+                <p className="mt-1 text-[12px] leading-relaxed text-slate-500 max-w-2xl">{currentSection.subtitle}</p>
               </div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-950">{currentSection.title}</h1>
-              <p className="mt-1 text-[12px] leading-relaxed text-slate-500 max-w-2xl">{currentSection.subtitle}</p>
             </div>
             <div className="shrink-0">
               {loading ? (
@@ -757,7 +834,7 @@ export default function App() {
           </div>
         </header>
 
-        {error && (
+        {error && section !== "upload" && (
           <div
             className="mb-5 flex items-start gap-3 rounded-[12px] px-4 py-3.5 animate-fade-up"
             style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}
@@ -778,13 +855,26 @@ export default function App() {
               upload={upload}
               availableDatasets={availableDatasets}
               onSelectDataset={handleSelectDataset}
+              uploadProgress={uploadProgress}
+              uploadPhase={uploadPhase}
+              selectedFileMeta={selectedFileMeta}
+              cancelUpload={cancelUpload}
+              error={error}
+              dashboard={smartDashboard}
             />
           )}
 
-          {section === "overview" && <OverviewSection summary={summary} ecommerce={ecommerce} />}
-          {section === "quality" && <QualitySection summary={summary} ecommerce={ecommerce} />}
+          {section === "profile" && (
+            <ProfileSection
+              summary={summary}
+              ecommerce={ecommerce}
+              activeTab={profileSubTab}
+              onTabChange={setProfileSubTab}
+            />
+          )}
+
           {section === "dashboard" && (
-            <SmartDashboardSection
+            <UnifiedDashboard
               dashboard={smartDashboard}
               dataDictionary={dataDictionary}
               customMetrics={customMetrics}
@@ -798,10 +888,6 @@ export default function App() {
               onSaveMetric={handleSaveMetric}
               onDeleteMetric={handleDeleteMetric}
               onEvaluateMetric={handleEvaluateMetric}
-            />
-          )}
-          {section === "ecommerce" && (
-            <EcommerceSection
               ecommerce={ecommerce}
               categoryRows={categoryRows}
               monthRows={monthRows}
@@ -815,27 +901,13 @@ export default function App() {
               b2bSummary={b2bSummary}
               cityRows={cityRows}
               stateRiskRows={stateRiskRows}
-            />
-          )}
-          {section === "charts" && (
-            <ChartsSection
-              columns={columns}
               chart={chart}
-              onSubmit={handleChart}
-              disabled={!datasetId}
-              ecommerce={ecommerce}
-              categoryRows={categoryRows}
-              monthRows={monthRows}
-              stateRows={stateRows}
-              skuRows={skuRows}
-              sizeRows={sizeRows}
-              categoryRiskRows={categoryRiskRows}
-              fulfilmentRows={fulfilmentRows}
-              promotionSummary={promotionSummary}
-              cityRows={cityRows}
-              stateRiskRows={stateRiskRows}
+              onChartSubmit={handleChart}
+              activeSubTab={dashboardSubTab}
+              onSubTabChange={setDashboardSubTab}
             />
           )}
+
           {section === "ask" && (
             <AskCopilot
               onAsk={handleAsk}
@@ -848,6 +920,7 @@ export default function App() {
               questionDraft={questionDraft}
               setQuestionDraft={setQuestionDraft}
               dashboard={smartDashboard}
+              onOpenMapping={() => setSection("profile")}
             />
           )}
 
@@ -948,162 +1021,204 @@ function LanguageToggle({ language, setLanguage }: { language: Language; setLang
 
 // ---------------------- SUBSECTIONS ----------------------
 
-function UploadSection({
-  onUpload,
-  upload,
-  availableDatasets,
-  onSelectDataset,
+
+// ─── ISSUE 1.1 FIX: Shared sub-tab bar ───────────────────────────────────────
+
+function SubTabBar({
+  tabs,
+  active,
+  onChange,
 }: {
-  onUpload: (file: File) => void;
-  upload: UploadResponse | null;
-  availableDatasets: WorkspaceDataset[];
-  onSelectDataset: (ds: WorkspaceDataset) => void;
+  tabs: { id: string; label: string }[];
+  active: string;
+  onChange: (id: string) => void;
 }) {
-  const sampleDomains = [
-    { icon: Store, label: 'Bán lẻ / Ecommerce', desc: 'Sales, đơn hàng, SKU, revenue theo category', color: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.18)' },
-    { icon: Users, label: 'Nhân sự / Attrition', desc: 'Nhân viên, lương, attrition rate, phòng ban', color: 'rgba(16,185,129,0.07)', border: 'rgba(16,185,129,0.2)' },
-    { icon: Megaphone, label: 'Marketing', desc: 'Campaign, phân khúc khách hàng, conversion', color: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.22)' },
-  ];
-
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      {/* Drop zone - Double-Bezel */}
-      <div className="doppelrand">
-        <div className="doppelrand-inner">
-          <label className="drop-zone flex flex-col items-center" style={{ cursor: 'pointer' }}>
-            <div
-              className="mb-4 flex h-14 w-14 items-center justify-center rounded-[14px]"
-              style={{
-                background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
-                border: '1px solid rgba(37,99,235,0.2)',
-                boxShadow: '0 4px 16px rgba(37,99,235,0.1)'
-              }}
-            >
-              <Upload style={{ width: 22, height: 22, color: '#2563eb' }} />
-            </div>
-            <h3 className="text-[15px] font-bold text-slate-900 tracking-tight">Thả file dữ liệu vào đây</h3>
-            <p className="mt-2 text-[12px] text-slate-500 max-w-xs text-center leading-relaxed">
-              Hỗ trợ .csv, .xls và .xlsx. Engine sẽ phân tích semantic và dựng dashboard tự động.
-            </p>
-            <div
-              className="mt-5 btn-primary"
-              style={{ pointerEvents: 'none' }}
-            >
-              <Upload style={{ width: 13, height: 13 }} />
-              Chọn file dữ liệu
-              <span
-                className="ml-1 flex h-5 w-5 items-center justify-center rounded-full"
-                style={{ background: 'rgba(255,255,255,0.15)' }}
-              >
-                <ArrowUpRight style={{ width: 10, height: 10 }} />
-              </span>
-            </div>
-            <input
-              type="file"
-              accept=".csv,.xls,.xlsx"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) onUpload(file);
-              }}
-            />
-          </label>
-        </div>
-      </div>
-
-      {/* Active file confirmation */}
-      {upload && (
-        <div
-          className="flex items-center justify-between rounded-[14px] px-4 py-3.5 animate-fade-up"
-          style={{
-            background: 'rgba(16,185,129,0.06)',
-            border: '1px solid rgba(16,185,129,0.2)',
-            boxShadow: '0 2px 8px rgba(16,185,129,0.08)'
-          }}
+    <div
+      className="flex gap-1 rounded-[10px] p-1 mb-6"
+      style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+    >
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          onClick={() => onChange(tab.id)}
+          className="flex-1 rounded-[8px] px-4 py-2 text-[12px] font-semibold transition-all duration-200"
+          style={
+            active === tab.id
+              ? {
+                  background: 'var(--surface)',
+                  color: 'var(--accent)',
+                  boxShadow: '0 1px 4px rgba(15,23,42,0.08)',
+                  border: '1px solid rgba(37,99,235,0.18)',
+                }
+              : { color: 'var(--text-secondary)', background: 'transparent', border: '1px solid transparent' }
+          }
         >
-          <div className="flex items-center gap-3">
-            <div
-              className="flex h-8 w-8 items-center justify-center rounded-[8px]"
-              style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.2)' }}
-            >
-              <CheckCircle2 style={{ width: 15, height: 15, color: '#10b981' }} />
-            </div>
-            <div>
-              <p className="section-label" style={{ color: '#059669' }}>File đã được đọc thành công</p>
-              <p className="text-[13px] font-semibold text-slate-800 mt-0.5">{upload.filename}</p>
-            </div>
-          </div>
-          <div className="flex gap-5 text-right font-mono">
-            <div>
-              <p className="section-label">Dòng</p>
-              <p className="text-[13px] font-bold text-slate-700 mt-0.5">{upload.rows.toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="section-label">Cột</p>
-              <p className="text-[13px] font-bold text-slate-700 mt-0.5">{upload.columns.toLocaleString()}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Sample domain cards */}
-      <div className="panel-shell">
-        <p className="section-label mb-3">Domain dữ liệu được hỗ trợ</p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {sampleDomains.map((d) => {
-            const Icon = d.icon;
-            return (
-              <div
-                key={d.label}
-                className="rounded-[12px] p-3.5"
-                style={{ background: d.color, border: `1px solid ${d.border}` }}
-              >
-                <Icon style={{ width: 18, height: 18, marginBottom: 8, color: 'var(--accent)' }} />
-                <p className="text-[12px] font-bold text-slate-800">{d.label}</p>
-                <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">{d.desc}</p>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Dataset history */}
-      {availableDatasets.length > 0 && (
-        <div className="panel-shell">
-          <p className="section-label mb-3">Lịch sử dataset trong workspace</p>
-          <div className="space-y-1.5">
-            {availableDatasets.map((ds) => {
-              const isActive = upload?.dataset_id === ds.dataset_id;
-              return (
-                <button
-                  key={ds.dataset_id}
-                  onClick={() => onSelectDataset(ds)}
-                  className="w-full flex items-center justify-between rounded-[10px] px-3.5 py-2.5 text-left transition-all"
-                  style={{
-                    background: isActive ? 'rgba(37,99,235,0.06)' : 'var(--surface-2)',
-                    border: `1px solid ${isActive ? 'rgba(37,99,235,0.22)' : 'var(--border)'}`,
-                  }}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Database
-                      style={{ width: 13, height: 13, color: isActive ? '#2563eb' : '#94a3b8', flexShrink: 0 }}
-                    />
-                    <span className="text-[12px] font-semibold text-slate-800">{ds.filename}</span>
-                  </div>
-                  <span className="section-label" style={{ color: isActive ? '#2563eb' : 'var(--text-muted)' }}>
-                    {isActive ? 'Đang dùng' : 'Khôi phục'}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+          {tab.label}
+        </button>
+      ))}
     </div>
   );
 }
 
+// ─── ProfileSection = Overview + Quality merged ───────────────────────────────
 
+function ProfileSection({
+  summary,
+  ecommerce,
+  activeTab,
+  onTabChange,
+}: {
+  summary: SummaryResponse | null;
+  ecommerce: EcommerceOverview | null;
+  activeTab: "overview" | "quality";
+  onTabChange: (tab: "overview" | "quality") => void;
+}) {
+  if (!summary) return <EmptyState />;
+  return (
+    <div>
+      <SubTabBar
+        tabs={[
+          { id: "overview", label: "Tổng quan dataset" },
+          { id: "quality", label: "Kiểm tra chất lượng" },
+        ]}
+        active={activeTab}
+        onChange={(id) => onTabChange(id as "overview" | "quality")}
+      />
+      {activeTab === "overview" && <OverviewSection summary={summary} ecommerce={ecommerce} />}
+      {activeTab === "quality" && <QualitySection summary={summary} ecommerce={ecommerce} />}
+    </div>
+  );
+}
+
+// ─── UnifiedDashboard = SmartDashboard + Charts + Ecommerce ──────────────────
+
+function UnifiedDashboard({
+  dashboard,
+  dataDictionary,
+  customMetrics,
+  columns,
+  onAskQuestion,
+  onSaveSemanticOverrides,
+  onResetSemanticOverrides,
+  onUploadDataDictionary,
+  onSaveDataDictionary,
+  onDeleteDataDictionary,
+  onSaveMetric,
+  onDeleteMetric,
+  onEvaluateMetric,
+  ecommerce,
+  categoryRows,
+  monthRows,
+  stateRows,
+  skuRows,
+  sizeRows,
+  categoryRiskRows,
+  fulfilmentRows,
+  courierRows,
+  promotionSummary,
+  b2bSummary,
+  cityRows,
+  stateRiskRows,
+  chart,
+  onChartSubmit,
+  activeSubTab,
+  onSubTabChange,
+}: {
+  dashboard: DashboardResponse | null;
+  dataDictionary: DataDictionaryResponse | null;
+  customMetrics: MetricDefinition[];
+  columns: string[];
+  onAskQuestion: (question: string) => void;
+  onSaveSemanticOverrides: (payload: { domain?: string | null; roles: Record<string, string | null> }) => void;
+  onResetSemanticOverrides: () => void;
+  onUploadDataDictionary: (file: File) => void;
+  onSaveDataDictionary: (dictionary: DataDictionary) => void;
+  onDeleteDataDictionary: () => void;
+  onSaveMetric: (metric: MetricDefinition, previousName?: string | null) => Promise<void>;
+  onDeleteMetric: (metricName: string) => Promise<void>;
+  onEvaluateMetric: (metricName: string) => Promise<MetricEvaluationResponse | null>;
+  ecommerce: EcommerceOverview | null;
+  categoryRows: RecordRow[];
+  monthRows: RecordRow[];
+  stateRows: RecordRow[];
+  skuRows: RecordRow[];
+  sizeRows: RecordRow[];
+  categoryRiskRows: RecordRow[];
+  fulfilmentRows: RecordRow[];
+  courierRows: RecordRow[];
+  promotionSummary: SummaryWrapper["summary"] | null;
+  b2bSummary: SummaryWrapper["summary"] | null;
+  cityRows: RecordRow[];
+  stateRiskRows: RecordRow[];
+  chart: { data: unknown[]; layout: Record<string, unknown> } | null;
+  onChartSubmit: (formData: FormData) => void;
+  activeSubTab: "kpis" | "charts" | "ecommerce";
+  onSubTabChange: (tab: "kpis" | "charts" | "ecommerce") => void;
+}) {
+  const isEcommerce = dashboard?.domain === "ecommerce";
+  const tabs = [
+    { id: "kpis", label: "KPI & Insights" },
+    { id: "charts", label: "Biểu đồ phân tích" },
+    ...(isEcommerce ? [{ id: "ecommerce", label: "E-commerce Chi tiết" }] : []),
+  ];
+
+  return (
+    <div>
+      <SubTabBar
+        tabs={tabs}
+        active={activeSubTab}
+        onChange={(id) => onSubTabChange(id as "kpis" | "charts" | "ecommerce")}
+      />
+
+      {activeSubTab === "kpis" && (
+        <SmartDashboardSection
+          dashboard={dashboard}
+          dataDictionary={dataDictionary}
+          customMetrics={customMetrics}
+          columns={columns}
+          onAskQuestion={onAskQuestion}
+          onSaveSemanticOverrides={onSaveSemanticOverrides}
+          onResetSemanticOverrides={onResetSemanticOverrides}
+          onUploadDataDictionary={onUploadDataDictionary}
+          onSaveDataDictionary={onSaveDataDictionary}
+          onDeleteDataDictionary={onDeleteDataDictionary}
+          onSaveMetric={onSaveMetric}
+          onDeleteMetric={onDeleteMetric}
+          onEvaluateMetric={onEvaluateMetric}
+        />
+      )}
+
+      {activeSubTab === "charts" && (
+        <ChartsSection
+          dashboard={dashboard}
+          columns={columns}
+          chart={chart}
+          onSubmit={onChartSubmit}
+          disabled={!dashboard}
+        />
+      )}
+
+      {activeSubTab === "ecommerce" && isEcommerce && (
+        <EcommerceSection
+          ecommerce={ecommerce}
+          categoryRows={categoryRows}
+          monthRows={monthRows}
+          stateRows={stateRows}
+          skuRows={skuRows}
+          sizeRows={sizeRows}
+          categoryRiskRows={categoryRiskRows}
+          fulfilmentRows={fulfilmentRows}
+          courierRows={courierRows}
+          promotionSummary={promotionSummary}
+          b2bSummary={b2bSummary}
+          cityRows={cityRows}
+          stateRiskRows={stateRiskRows}
+        />
+      )}
+    </div>
+  );
+}
 function OverviewSection({ summary, ecommerce }: { summary: SummaryResponse | null; ecommerce: EcommerceOverview | null }) {
   if (!summary) return <EmptyState />;
   return (
@@ -1241,145 +1356,34 @@ function SmartDashboardSection({
   onDeleteMetric: (metricName: string) => Promise<void>;
   onEvaluateMetric: (metricName: string) => Promise<MetricEvaluationResponse | null>;
 }) {
-  const [domainDraft, setDomainDraft] = useState("");
-  const [roleDraft, setRoleDraft] = useState<Record<string, string>>({});
-  const [dictionaryDraft, setDictionaryDraft] = useState<DataDictionary>({ domain: null, fields: [] });
-  const emptyMetricDraft: MetricDefinition = {
-    name: "",
-    label: "",
-    description: "",
-    expression: "",
-    format: "number",
-    aggregation: "mean",
-    required_roles: [],
-    higher_is_better: true,
-  };
-  const [metricDraft, setMetricDraft] = useState<MetricDefinition>(emptyMetricDraft);
-  const [editingMetricName, setEditingMetricName] = useState<string | null>(null);
-  const [metricPreview, setMetricPreview] = useState<MetricEvaluationResponse | null>(null);
-
-  useEffect(() => {
-    if (!dashboard) return;
-    setDomainDraft(dashboard.semantic_profile.overrides?.domain || dashboard.domain);
-    setRoleDraft(Object.fromEntries(Object.entries(dashboard.semantic_profile.roles).map(([role, match]) => [role, match.column])));
-    const currentDictionary = dataDictionary?.dictionary;
-    const fieldsByColumn = new Map((currentDictionary?.fields || []).map((field) => [field.column_name, field]));
-    const dictionaryColumns = columns.length > 0 ? columns : Array.from(new Set([
-      ...Object.values(dashboard.semantic_profile.roles).map((match) => match.column),
-      ...dashboard.semantic_profile.unmatched_columns,
-    ]));
-    setDictionaryDraft({
-      domain: currentDictionary?.domain || dashboard.domain,
-      fields: dictionaryColumns.map((column) => ({
-        column_name: column,
-        business_name: fieldsByColumn.get(column)?.business_name || "",
-        description: fieldsByColumn.get(column)?.description || "",
-        semantic_role: fieldsByColumn.get(column)?.semantic_role || "",
-        data_type: fieldsByColumn.get(column)?.data_type || "",
-        unit: fieldsByColumn.get(column)?.unit || "",
-        aggregation: fieldsByColumn.get(column)?.aggregation || "",
-        sensitive: fieldsByColumn.get(column)?.sensitive || false,
-        allowed_values: fieldsByColumn.get(column)?.allowed_values || [],
-      })),
-    });
-  }, [dashboard, dataDictionary, columns]);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
   if (!dashboard) return <EmptyState message="Hãy upload dataset để tạo dashboard thông minh từ backend." />;
-  const candidateRoles = Object.keys(dashboard.semantic_profile.candidates || dashboard.semantic_profile.roles).sort();
-  const allColumns = Array.from(new Set([
-    ...Object.values(dashboard.semantic_profile.roles).map((match) => match.column),
-    ...Object.values(dashboard.semantic_profile.candidates || {}).flat().map((candidate) => candidate.column),
-    ...dashboard.semantic_profile.unmatched_columns,
-  ])).filter((column): column is string => Boolean(column));
-  const domainOptions = ["ecommerce", "retail", "marketing", "hr", "finance", "logistics", "education", "survey", "product", "generic"];
-  const roleOptions = ["", "revenue", "cost", "profit", "margin", "discount", "date", "category", "segment", "quantity", "city", "state", "country", "customer", "campaign", "channel", "employee", "department", "job_role", "salary", "target", "conversion", "overtime", "tenure", "recency", "monetary", "frequency"];
-  const dataTypeOptions = ["", "string", "number", "date", "boolean", "categorical"];
-  const aggregationOptions = ["", "sum", "mean", "count", "min", "max", "median"];
-  const metricFormatOptions: MetricDefinition["format"][] = ["number", "percent", "currency", "integer"];
-  const metricAggregationOptions: MetricDefinition["aggregation"][] = ["mean", "sum", "median", "min", "max", "count"];
-  const expressionTokens = Array.from(new Set([
-    ...Object.keys(dashboard.semantic_profile.roles),
-    ...allColumns.map(toMetricExpressionToken),
-  ])).filter(Boolean).slice(0, 28);
-
-  function updateDictionaryField(index: number, key: keyof DataDictionary["fields"][number], value: unknown) {
-    setDictionaryDraft((prev) => ({
-      ...prev,
-      fields: prev.fields.map((field, fieldIndex) =>
-        fieldIndex === index ? { ...field, [key]: value } : field
-      ),
-    }));
-  }
-
-  function selectMetric(metric: MetricDefinition) {
-    setEditingMetricName(metric.name);
-    setMetricDraft({
-      ...metric,
-      label: metric.label || "",
-      description: metric.description || "",
-      required_roles: metric.required_roles || [],
-    });
-    setMetricPreview(null);
-  }
-
-  function resetMetricDraft() {
-    setEditingMetricName(null);
-    setMetricDraft(emptyMetricDraft);
-    setMetricPreview(null);
-  }
-
-  async function saveMetricDraft() {
-    await onSaveMetric(
-      {
-        ...metricDraft,
-        name: metricDraft.name.trim(),
-        label: metricDraft.label?.trim() || metricDraft.name.trim(),
-        description: metricDraft.description?.trim() || null,
-        expression: metricDraft.expression.trim(),
-        required_roles: metricDraft.required_roles.filter(Boolean),
-      },
-      editingMetricName,
-    );
-    resetMetricDraft();
-  }
-
-  async function evaluateMetricDraft() {
-    const metricName = editingMetricName || metricDraft.name.trim();
-    if (!metricName) return;
-    const result = await onEvaluateMetric(metricName);
-    if (result) setMetricPreview(result);
-  }
-
-  async function deleteSelectedMetric() {
-    if (!editingMetricName) return;
-    await onDeleteMetric(editingMetricName);
-    resetMetricDraft();
-  }
 
   return (
     <div className="space-y-6">
       <div className="overflow-hidden rounded-lg border border-slate-200/80 bg-slate-950 p-5 text-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
         <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
-        <div>
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-300">Domain được phát hiện</div>
-          <h2 className="mt-1 text-2xl font-black capitalize tracking-tight text-white">{dashboard.domain}</h2>
-          <p className="mt-1 text-[11px] text-slate-300">
-            Contract v{dashboard.contract_version ?? 1} · Độ tin cậy {Math.round((dashboard.semantic_profile.domain_confidence ?? 0.5) * 100)}% · Cache {String(dashboard.cache?.dashboard ?? "n/a")}
-          </p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-right">
-          <MiniMeta label="Vai trò" value={String(Object.keys(dashboard.semantic_profile.roles).length)} />
-          <MiniMeta label="Biểu đồ" value={String(dashboard.charts.length)} />
-          <MiniMeta label="Dataset" value={dashboard.dataset_id.slice(0, 8)} />
-        </div>
+          <div>
+            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-300">Domain được phát hiện</div>
+            <h2 className="mt-1 text-2xl font-black capitalize tracking-tight text-white">{dashboard.domain}</h2>
+            <p className="mt-1 text-[11px] text-slate-300">
+              Contract v{dashboard.contract_version ?? 1} · Độ tin cậy {Math.round((dashboard.semantic_profile.domain_confidence ?? 0.5) * 100)}% · Cache {String(dashboard.cache?.dashboard ?? "n/a")}
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-right">
+            <MiniMeta label="Vai trò" value={String(Object.keys(dashboard.semantic_profile.roles).length)} />
+            <MiniMeta label="Biểu đồ" value={String(dashboard.charts.length)} />
+            <MiniMeta label="Dataset" value={dashboard.dataset_id.slice(0, 8)} />
+          </div>
         </div>
       </div>
 
       {dashboard.warnings.length > 0 && (
         <div className="space-y-2">
           {dashboard.warnings.map((warning) => (
-            <div key={warning} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-              {warning}
+            <div key={warning} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 animate-fade-up">
+              ⚠️ {warning}
             </div>
           ))}
         </div>
@@ -1455,419 +1459,28 @@ function SmartDashboardSection({
         ))}
       </div>
 
-      <Panel title="Metric Builder" subtitle="Định nghĩa metric business dùng lại được từ semantic roles hoặc cột numeric.">
-        <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
-          <div className="space-y-3">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Metric đã lưu</div>
-              <div className="mt-3 space-y-2">
-                {customMetrics.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-[11px] leading-relaxed text-slate-500">
-                    Chưa có custom metric. Hãy thử `margin = profit / revenue` cho dataset retail/finance.
-                  </div>
-                ) : (
-                  customMetrics.map((metric) => (
-                    <button
-                      key={metric.name}
-                      onClick={() => selectMetric(metric)}
-                      className={`w-full rounded-lg border px-3 py-2 text-left shadow-sm transition ${editingMetricName === metric.name ? "border-indigo-300 bg-indigo-50" : "border-slate-200 bg-white hover:border-slate-300"}`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-slate-800">{metric.label || metric.name}</span>
-                        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase text-slate-500">{metric.format}</span>
-                      </div>
-                      <div className="mt-1 font-mono text-[10px] text-slate-500">{metric.expression}</div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
+      <SemanticMappingSummary
+        dashboard={dashboard}
+        onToggleAdvanced={() => setIsAdvancedOpen(!isAdvancedOpen)}
+        isAdvancedOpen={isAdvancedOpen}
+      />
 
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-[11px] leading-relaxed text-indigo-800">
-              Expression được chạy bằng safe AST engine. Cho phép: roles, cột numeric, hằng số, +, -, *, / và hàm an toàn `sum`, `mean`, `count`, `safe_div`.
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Tên metric
-                <input
-                  value={metricDraft.name}
-                  onChange={(event) => setMetricDraft((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="margin"
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono text-slate-700"
-                />
-              </label>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Nhãn hiển thị
-                <input
-                  value={metricDraft.label || ""}
-                  onChange={(event) => setMetricDraft((prev) => ({ ...prev, label: event.target.value }))}
-                  placeholder="Margin"
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700"
-                />
-              </label>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Định dạng
-                <select
-                  value={metricDraft.format}
-                  onChange={(event) => setMetricDraft((prev) => ({ ...prev, format: event.target.value as MetricDefinition["format"] }))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700"
-                >
-                  {metricFormatOptions.map((format) => <option key={format} value={format}>{format}</option>)}
-                </select>
-              </label>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Cách tổng hợp
-                <select
-                  value={metricDraft.aggregation}
-                  onChange={(event) => setMetricDraft((prev) => ({ ...prev, aggregation: event.target.value as MetricDefinition["aggregation"] }))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700"
-                >
-                  {metricAggregationOptions.map((aggregation) => <option key={aggregation} value={aggregation}>{aggregation}</option>)}
-                </select>
-              </label>
-            </div>
-
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              Công thức
-              <input
-                value={metricDraft.expression}
-                onChange={(event) => setMetricDraft((prev) => ({ ...prev, expression: event.target.value }))}
-                placeholder="profit / revenue"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs text-slate-700"
-              />
-            </label>
-
-            <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Mô tả
-                <input
-                  value={metricDraft.description || ""}
-                  onChange={(event) => setMetricDraft((prev) => ({ ...prev, description: event.target.value }))}
-                  placeholder="Profit divided by revenue"
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700"
-                />
-              </label>
-              <label className="flex items-end gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={metricDraft.higher_is_better}
-                  onChange={(event) => setMetricDraft((prev) => ({ ...prev, higher_is_better: event.target.checked }))}
-                />
-                Giá trị cao là tốt hơn
-              </label>
-            </div>
-
-            <div>
-              <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">Role bắt buộc</div>
-              <div className="flex flex-wrap gap-2">
-                {roleOptions.filter(Boolean).map((role) => (
-                  <button
-                    key={`metric-role-${role}`}
-                    type="button"
-                    onClick={() => setMetricDraft((prev) => ({
-                      ...prev,
-                      required_roles: prev.required_roles.includes(role)
-                        ? prev.required_roles.filter((item) => item !== role)
-                        : [...prev.required_roles, role],
-                    }))}
-                    className={`rounded-lg border px-2 py-1 text-[10px] font-semibold ${metricDraft.required_roles.includes(role) ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"}`}
-                  >
-                    {role}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
-                Role khả dụng: {Object.keys(dashboard.semantic_profile.roles).slice(0, 10).join(", ") || "không có"}.
-                <br />
-                Cột numeric cũng có thể dùng trực tiếp nếu tên cột là identifier hợp lệ.
-              </div>
-              <button
-                onClick={saveMetricDraft}
-                disabled={!metricDraft.name.trim() || !metricDraft.expression.trim()}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                Lưu metric
-              </button>
-              <button
-                onClick={evaluateMetricDraft}
-                disabled={!editingMetricName && !customMetrics.some((metric) => metric.name === metricDraft.name.trim())}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-              >
-                Đánh giá
-              </button>
-              <button
-                onClick={resetMetricDraft}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-slate-50"
-              >
-                Tạo mới
-              </button>
-            </div>
-
-            {editingMetricName && (
-              <button
-                onClick={deleteSelectedMetric}
-                className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-[10px] font-bold text-rose-700 hover:bg-rose-100"
-              >
-                Xóa `{editingMetricName}`
-              </button>
-            )}
-
-            {metricPreview && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Xem trước kết quả</div>
-                <DataTable rows={[metricPreview.summary]} />
-              </div>
-            )}
-
-            <div className="rounded-xl border border-slate-200 bg-white p-3">
-              <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">Gợi ý token cho công thức</div>
-              <div className="flex flex-wrap gap-2">
-                {expressionTokens.map((token) => (
-                  <button
-                    key={`token-${token}`}
-                    type="button"
-                    onClick={() => setMetricDraft((prev) => ({ ...prev, expression: `${prev.expression}${prev.expression ? " " : ""}${token}` }))}
-                    className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[10px] text-slate-600 hover:border-indigo-200 hover:text-indigo-700"
-                  >
-                    {token}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </Panel>
-
-      <Panel title="Data Dictionary" subtitle="Mô tả ý nghĩa cột bằng business name, semantic role, data type, unit và sensitivity flag.">
-        <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_auto_auto]">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
-            Nguồn: <span className="font-semibold text-slate-800">{dataDictionary?.source || "none"}</span>
-            {(dataDictionary?.warnings || []).length > 0 && (
-              <div className="mt-1 text-amber-700">{dataDictionary!.warnings.join(" · ")}</div>
-            )}
-          </div>
-          <label className="flex cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-slate-50">
-            Upload CSV/JSON
-            <input
-              type="file"
-              accept=".csv,.json"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) onUploadDataDictionary(file);
-                event.currentTarget.value = "";
-              }}
-            />
-          </label>
-          <button
-            onClick={onDeleteDataDictionary}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-slate-50"
-          >
-            Xóa dictionary
-          </button>
-        </div>
-
-        <div className="mb-4 grid gap-3 md:grid-cols-[180px_1fr_auto]">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-            Domain trong dictionary
-            <select
-              value={dictionaryDraft.domain || ""}
-              onChange={(event) => setDictionaryDraft((prev) => ({ ...prev, domain: event.target.value || null }))}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700"
-            >
-              <option value="">Tự động</option>
-              {domainOptions.map((domain) => (
-                <option key={domain} value={domain}>{domain}</option>
-              ))}
-            </select>
-          </label>
-          <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-[11px] leading-relaxed text-indigo-800">
-            Mapping từ dictionary được ưu tiên hơn auto-detection. Semantic override thủ công vẫn có ưu tiên cao nhất.
-          </div>
-          <button
-            onClick={() => onSaveDataDictionary({
-              domain: dictionaryDraft.domain || null,
-              fields: dictionaryDraft.fields.filter((field) =>
-                field.business_name || field.description || field.semantic_role || field.data_type || field.unit || field.aggregation || field.sensitive || field.allowed_values.length > 0
-              ),
-            })}
-            className="rounded-lg bg-indigo-600 px-3 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-indigo-700"
-          >
-            Lưu dictionary
-          </button>
-        </div>
-
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
-          <table className="min-w-[1180px] w-full divide-y divide-slate-200 text-left text-[11px]">
-            <thead className="bg-slate-50 text-[9px] font-bold uppercase tracking-wider text-slate-500">
-              <tr>
-                <th className="px-3 py-2">Cột</th>
-                <th className="px-3 py-2">Tên business</th>
-                <th className="px-3 py-2">Role</th>
-                <th className="px-3 py-2">Kiểu</th>
-                <th className="px-3 py-2">Unit</th>
-                <th className="px-3 py-2">Tổng hợp</th>
-                <th className="px-3 py-2">Nhạy cảm</th>
-                <th className="px-3 py-2">Giá trị hợp lệ</th>
-                <th className="px-3 py-2">Mô tả</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
-              {dictionaryDraft.fields.map((field, index) => (
-                <tr key={field.column_name}>
-                  <td className="px-3 py-2 font-mono text-[10px] font-semibold text-slate-700">{field.column_name}</td>
-                  <td className="px-3 py-2">
-                    <input
-                      value={field.business_name || ""}
-                      onChange={(event) => updateDictionaryField(index, "business_name", event.target.value)}
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <select
-                      value={field.semantic_role || ""}
-                      onChange={(event) => updateDictionaryField(index, "semantic_role", event.target.value)}
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
-                    >
-                      {roleOptions.map((role) => (
-                        <option key={`${field.column_name}-${role || "none"}`} value={role}>{role || "Không chọn"}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-2">
-                    <select
-                      value={field.data_type || ""}
-                      onChange={(event) => updateDictionaryField(index, "data_type", event.target.value)}
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
-                    >
-                      {dataTypeOptions.map((dataType) => (
-                        <option key={`${field.column_name}-${dataType || "auto"}`} value={dataType}>{dataType || "Tự động"}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      value={field.unit || ""}
-                      onChange={(event) => updateDictionaryField(index, "unit", event.target.value)}
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <select
-                      value={field.aggregation || ""}
-                      onChange={(event) => updateDictionaryField(index, "aggregation", event.target.value)}
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
-                    >
-                      {aggregationOptions.map((aggregation) => (
-                        <option key={`${field.column_name}-${aggregation || "none"}`} value={aggregation}>{aggregation || "Không chọn"}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      checked={field.sensitive}
-                      onChange={(event) => updateDictionaryField(index, "sensitive", event.target.checked)}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      value={(field.allowed_values || []).join("|")}
-                      onChange={(event) => updateDictionaryField(index, "allowed_values", event.target.value.split("|").map((item) => item.trim()).filter(Boolean))}
-                      placeholder="A|B|C"
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      value={field.description || ""}
-                      onChange={(event) => updateDictionaryField(index, "description", event.target.value)}
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px]"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
-      <Panel title="Semantic Mapping Studio" subtitle="Kiểm tra và chỉnh lại business roles khi auto mapper đoán chưa đúng.">
-        <div className="mb-4 grid gap-3 md:grid-cols-[180px_1fr_auto_auto]">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-            Domain
-            <select
-              value={domainDraft}
-              onChange={(event) => setDomainDraft(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700"
-            >
-              {["ecommerce", "retail", "marketing", "hr", "finance", "generic"].map((domain) => (
-                <option key={domain} value={domain}>{domain}</option>
-              ))}
-            </select>
-          </label>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-            {(dashboard.semantic_profile.domain_reasons || []).join(" · ") || "Domain was inferred from semantic roles."}
-          </div>
-          <button
-            onClick={() => onSaveSemanticOverrides({ domain: domainDraft, roles: roleDraft })}
-            className="rounded-lg bg-indigo-600 px-3 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-indigo-700"
-          >
-            Lưu mapping
-          </button>
-          <button
-            onClick={onResetSemanticOverrides}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-slate-50"
-          >
-            Đặt lại
-          </button>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {candidateRoles.map((role) => (
-            <div key={role} className="rounded-xl border border-slate-200 bg-white p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{role}</div>
-                <div className="text-[10px] text-slate-400">
-                  {dashboard.semantic_profile.roles[role]?.confidence_label || "candidate"}
-                </div>
-              </div>
-              <select
-                value={roleDraft[role] || ""}
-                onChange={(event) => setRoleDraft((prev) => ({ ...prev, [role]: event.target.value }))}
-                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700"
-              >
-                <option value="">Chưa map</option>
-                {allColumns.map((column) => (
-                  <option key={`${role}-${column}`} value={column}>{column}</option>
-                ))}
-              </select>
-              <div className="mt-2 text-[10px] leading-relaxed text-slate-500">
-                {(dashboard.semantic_profile.candidates?.[role] || []).slice(0, 2).map((candidate) => `${candidate.column} (${Math.round(candidate.confidence * 100)}%)`).join(" · ") || "Chưa có candidate mạnh."}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel title="Debug semantic profile" subtitle="Các role và confidence score đang được backend dashboard sử dụng.">
-        <DataTable
-          rows={Object.entries(dashboard.semantic_profile.roles).map(([role, match]) => ({
-            role,
-            column: match.column,
-            confidence: match.confidence,
-            confidence_label: match.confidence_label,
-            source: match.source || match.confidence_label || "auto",
-            reason: match.reason,
-          }))}
+      {isAdvancedOpen && (
+        <AdvancedDataControls
+          dashboard={dashboard}
+          dataDictionary={dataDictionary}
+          customMetrics={customMetrics}
+          columns={columns}
+          onSaveSemanticOverrides={onSaveSemanticOverrides}
+          onResetSemanticOverrides={onResetSemanticOverrides}
+          onUploadDataDictionary={onUploadDataDictionary}
+          onSaveDataDictionary={onSaveDataDictionary}
+          onDeleteDataDictionary={onDeleteDataDictionary}
+          onSaveMetric={onSaveMetric}
+          onDeleteMetric={onDeleteMetric}
+          onEvaluateMetric={onEvaluateMetric}
         />
-      </Panel>
+      )}
     </div>
   );
 }
@@ -2001,162 +1614,128 @@ function EcommerceSection({
 }
 
 function ChartsSection({
+  dashboard,
   columns,
   chart,
   onSubmit,
   disabled,
-  ecommerce,
-  categoryRows,
-  monthRows,
-  stateRows,
-  skuRows,
-  sizeRows,
-  categoryRiskRows,
-  fulfilmentRows,
-  promotionSummary,
-  cityRows,
-  stateRiskRows,
 }: {
+  dashboard: DashboardResponse | null;
   columns: string[];
   chart: { data: unknown[]; layout: Record<string, unknown> } | null;
   onSubmit: (formData: FormData) => void;
   disabled: boolean;
-  ecommerce: EcommerceOverview | null;
-  categoryRows: RecordRow[];
-  monthRows: RecordRow[];
-  stateRows: RecordRow[];
-  skuRows: RecordRow[];
-  sizeRows: RecordRow[];
-  categoryRiskRows: RecordRow[];
-  fulfilmentRows: RecordRow[];
-  promotionSummary: SummaryWrapper["summary"] | null;
-  cityRows: RecordRow[];
-  stateRiskRows: RecordRow[];
 }) {
-  const promotionRows = summaryItems(promotionSummary);
-  const autoFigures = buildDashboardFigures({
-    categoryRows,
-    monthRows,
-    stateRows,
-    skuRows,
-    sizeRows,
-    categoryRiskRows,
-    fulfilmentRows,
-    promotionRows,
-    cityRows,
-    stateRiskRows,
-  });
-  const insights = buildDashboardInsights({
-    ecommerce,
-    categoryRows,
-    skuRows,
-    stateRows,
-    categoryRiskRows,
-    fulfilmentRows,
-    promotionRows,
-    stateRiskRows,
-  });
+  const [activeTab, setActiveTab] = useState<"dashboard" | "custom">("dashboard");
 
   return (
     <div className="space-y-6">
-      {!ecommerce ? (
-        <EmptyState message="Hãy cung cấp dataset Amazon Sales hợp lệ để dựng biểu đồ phân tích tự động." />
-      ) : (
-        <>
-          <Panel
-            title="Tín hiệu business quan trọng"
-            subtitle="Các KPI vận hành chính được tính trực tiếp từ dataset."
-          >
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 mt-2">
-              {insights.map((insight, idx) => (
-                <div
-                  key={insight.label}
-                  className={`rounded-xl border p-4 transition-colors ${
-                    insight.tone === "risk"
-                      ? "border-rose-200 bg-rose-50/50 text-rose-900"
-                      : "border-slate-200 bg-slate-50/30 text-slate-800"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">{insight.label}</span>
-                    <span className={`w-1.5 h-1.5 rounded-full ${insight.tone === "risk" ? "bg-rose-500 animate-pulse" : "bg-indigo-500"}`} />
-                  </div>
-                  <div className="mt-1.5 text-lg font-bold text-slate-900 tracking-tight">{insight.value}</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{insight.note}</p>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel
-            title="Biểu đồ phân tích tự động"
-            subtitle="Các biểu đồ Plotly tự động mô hình hóa business metrics."
-          >
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 mt-2">
-              {autoFigures.map((figure) => (
-                <ChartPanel key={figure.title} title={figure.title} note={figure.note} figure={figure} />
-              ))}
-            </div>
-          </Panel>
-        </>
-      )}
-
-      <Panel
-        title="Trình khám phá chart tùy chỉnh"
-        subtitle="Tự chọn biến để kiểm tra mối quan hệ giữa dimension và metric."
-      >
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSubmit(new FormData(event.currentTarget));
-          }}
-          className="grid grid-cols-1 gap-4 md:grid-cols-4 mt-2"
+      {/* Sub-tab navigation */}
+      <div className="flex border-b border-slate-200 dark:border-slate-800">
+        <button
+          onClick={() => setActiveTab("dashboard")}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 ${
+            activeTab === "dashboard"
+              ? "border-indigo-600 text-indigo-600"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
         >
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-mono text-slate-400 font-bold uppercase">Loại biểu đồ</label>
-            <Select name="chart_type" options={["bar", "line", "scatter", "histogram", "box"]} disabled={disabled} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-mono text-slate-400 font-bold uppercase">Biến X (dimension)</label>
-            <Select name="x" options={columns} disabled={disabled} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-mono text-slate-400 font-bold uppercase">Biến Y (metric)</label>
-            <Select name="y" options={["", ...columns]} disabled={disabled} />
-          </div>
-          <div className="flex items-end">
-            <button
-              disabled={disabled}
-              className="w-full h-[38px] rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs transition-colors shadow-sm disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-1.5"
-            >
-              <Sparkles size={12} />
-              Vẽ biểu đồ
-            </button>
-          </div>
-        </form>
-      </Panel>
+          Biểu đồ từ dashboard
+        </button>
+        <button
+          onClick={() => setActiveTab("custom")}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 ${
+            activeTab === "custom"
+              ? "border-indigo-600 text-indigo-600"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          Tự tạo biểu đồ
+        </button>
+      </div>
 
-      {chart && (
-        <Panel title="Kết quả biểu đồ" subtitle="Plotly spec được tạo động từ lựa chọn hiện tại.">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 mt-3 shadow-sm">
-            <Suspense fallback={<ChartLoading height={400} />}>
-              <Plot
-                data={chart.data as never[]}
-                layout={{
-                  ...chart.layout,
-                  autosize: true,
-                  paper_bgcolor: "rgba(0,0,0,0)",
-                  plot_bgcolor: "rgba(0,0,0,0)",
-                  font: { family: "Outfit, sans-serif", color: "#1e293b" },
-                  xaxis: { ...(chart.layout.xaxis as object), gridcolor: "#f1f5f9" },
-                  yaxis: { ...(chart.layout.yaxis as object), gridcolor: "#f1f5f9" },
-                }}
-                className="w-full h-[400px]"
-                useResizeHandler
-              />
-            </Suspense>
-          </div>
-        </Panel>
+      {activeTab === "dashboard" ? (
+        <div className="space-y-6">
+          {!dashboard || !dashboard.charts || dashboard.charts.length === 0 ? (
+            <EmptyState message="Backend chưa tạo biểu đồ phù hợp cho dataset này." />
+          ) : (
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              {dashboard.charts.map((item) => (
+                <ChartPanel
+                  key={`${item.id || item.title}-${item.description}`}
+                  title={item.title}
+                  note={item.description}
+                  figure={{
+                    title: item.title,
+                    note: item.description,
+                    data: item.chart.data,
+                    layout: item.chart.layout,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <Panel
+            title="Trình khám phá chart tùy chỉnh"
+            subtitle="Tự chọn biến để kiểm tra mối quan hệ giữa dimension và metric."
+          >
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                onSubmit(new FormData(event.currentTarget));
+              }}
+              className="grid grid-cols-1 gap-4 md:grid-cols-4 mt-2"
+            >
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-mono text-slate-400 font-bold uppercase">Loại biểu đồ</label>
+                <Select name="chart_type" options={["bar", "line", "scatter", "histogram", "box"]} disabled={disabled} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-mono text-slate-400 font-bold uppercase">Biến X (dimension)</label>
+                <Select name="x" options={columns} disabled={disabled} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-mono text-slate-400 font-bold uppercase">Biến Y (metric)</label>
+                <Select name="y" options={["", ...columns]} disabled={disabled} />
+              </div>
+              <div className="flex items-end">
+                <button
+                  disabled={disabled}
+                  className="w-full h-[38px] rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs transition-colors shadow-sm disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles size={12} />
+                  Vẽ biểu đồ
+                </button>
+              </div>
+            </form>
+          </Panel>
+
+          {chart && (
+            <Panel title="Kết quả biểu đồ" subtitle="Plotly spec được tạo động từ lựa chọn hiện tại.">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 mt-3 shadow-sm">
+                <Suspense fallback={<ChartLoading height={400} />}>
+                  <Plot
+                    data={chart.data as never[]}
+                    layout={{
+                      ...chart.layout,
+                      autosize: true,
+                      paper_bgcolor: "rgba(0,0,0,0)",
+                      plot_bgcolor: "rgba(0,0,0,0)",
+                      font: { family: "Outfit, sans-serif", color: "#1e293b" },
+                      xaxis: { ...(chart.layout.xaxis as object), gridcolor: "#f1f5f9" },
+                      yaxis: { ...(chart.layout.yaxis as object), gridcolor: "#f1f5f9" },
+                    }}
+                    className="w-full h-[400px]"
+                    useResizeHandler
+                  />
+                </Suspense>
+              </div>
+            </Panel>
+          )}
+        </div>
       )}
     </div>
   );
@@ -2405,10 +1984,15 @@ function HighlightCard({
   secondaryKeys: string[];
   bgClass: string;
 }) {
+  const { language } = useI18n();
+  const isVi = language === "vi";
+
   if (!row) {
     return (
       <Panel title={title}>
-        <div className="text-[11px] text-slate-400 py-3">Attributes not recognized in current dataset context.</div>
+        <div className="text-[11px] text-slate-400 py-3">
+          {isVi ? "Không nhận diện thuộc tính trong dataset này." : "Attributes not recognized in current dataset context."}
+        </div>
       </Panel>
     );
   }
@@ -2419,7 +2003,7 @@ function HighlightCard({
         <ArrowUpRight className="text-slate-400 w-3.5 h-3.5 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
       </div>
 
-      <div className="text-xl font-bold text-slate-900 tracking-tight leading-none truncate select-all">{formatCell(row[primaryKey])}</div>
+      <div className="text-xl font-bold text-slate-900 tracking-tight leading-none truncate select-all">{formatCell(row[primaryKey], isVi)}</div>
 
       <div className="mt-4 grid grid-cols-2 gap-2.5">
         {secondaryKeys.map((key) => (
@@ -2428,7 +2012,7 @@ function HighlightCard({
             className="rounded-lg border border-slate-100 bg-white/90 p-2.5 transition-colors hover:border-slate-200"
           >
             <div className="text-[8px] font-mono font-bold uppercase text-slate-400 tracking-wider">{key}</div>
-            <div className="mt-0.5 text-xs font-semibold text-slate-800">{formatCell(row[key])}</div>
+            <div className="mt-0.5 text-xs font-semibold text-slate-800">{formatCell(row[key], isVi)}</div>
           </div>
         ))}
       </div>
@@ -2437,8 +2021,16 @@ function HighlightCard({
 }
 
 function DataTable({ rows, riskColumn }: { rows: RecordRow[]; riskColumn?: string }) {
+  const { language } = useI18n();
+  const isVi = language === "vi";
   const columns = useMemo(() => Object.keys(rows[0] ?? {}), [rows]);
-  if (!rows.length) return <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 py-7 text-center text-xs font-semibold text-slate-400">No rows parsed.</div>;
+  if (!rows.length) {
+    return (
+      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 py-7 text-center text-xs font-semibold text-slate-400">
+        {isVi ? "Không có dữ liệu dòng." : "No rows parsed."}
+      </div>
+    );
+  }
   return (
     <div className="max-h-[420px] overflow-auto rounded-lg border border-slate-200/80 bg-white/95 shadow-inner">
       <table className="w-full border-collapse text-xs select-text">
@@ -2462,7 +2054,7 @@ function DataTable({ rows, riskColumn }: { rows: RecordRow[]; riskColumn?: strin
             >
               {columns.map((column) => (
                 <td key={column} className={`whitespace-nowrap px-4 py-2.5 align-middle font-medium ${column === columns[0] ? "text-slate-900" : "text-slate-700"}`}>
-                  {formatCell(row[column])}
+                  {formatCell(row[column], isVi)}
                 </td>
               ))}
             </tr>
@@ -2782,13 +2374,49 @@ function toMetricExpressionToken(value: string) {
   return /^[0-9]/.test(token) ? `col_${token}` : token;
 }
 
-function formatCell(value: unknown) {
+export function formatBooleanLocalized(val: boolean, isVi: boolean): string {
+  return val ? (isVi ? "Có" : "Yes") : (isVi ? "Không" : "No");
+}
+
+export function formatEmptyLocalized(val: unknown, isVi: boolean): string {
+  return isVi ? "Không có" : "N/A";
+}
+
+export function humanizeMetricLabelLocalized(label: string, isVi: boolean): string {
+  const mappingVi: Record<string, string> = {
+    mean: "Trung bình",
+    sum: "Tổng",
+    median: "Trung vị",
+    min: "Nhỏ nhất",
+    max: "Lớn nhất",
+    count: "Số lượng",
+    number: "Số thực",
+    percent: "Phần trăm",
+    currency: "Tiền tệ",
+    integer: "Số nguyên",
+  };
+  const mappingEn: Record<string, string> = {
+    mean: "Average",
+    sum: "Sum",
+    median: "Median",
+    min: "Minimum",
+    max: "Maximum",
+    count: "Count",
+    number: "Float",
+    percent: "Percentage",
+    currency: "Currency",
+    integer: "Integer",
+  };
+  return (isVi ? mappingVi[label.toLowerCase()] : mappingEn[label.toLowerCase()]) || label;
+}
+
+function formatCell(value: unknown, isVi = false) {
+  if (value === null || value === undefined || value === "") return formatEmptyLocalized(value, isVi);
+  if (typeof value === "boolean") return formatBooleanLocalized(value, isVi);
   if (typeof value === "number") {
     // If it's a decimal between 0 and 1, probably a percentage
     if (value > 0 && value < 1) return (value * 100).toFixed(2) + "%";
     return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
-  if (value === null || value === undefined) return "";
-  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   return String(value);
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.answer_composer import answer_card_to_text, compose_answer_card, compose_tool_error_card, merge_llm_answer_card
+from app.services.result_quality import assess_result_quality
 
 
 def test_compose_answer_card_for_breakdown_result():
@@ -75,3 +76,35 @@ def test_tool_error_card_contains_error_warning():
     assert card["answer_source"] == "tool_error"
     assert card["data_warnings"] == ["Missing required role"]
     assert "chưa chạy được" in card["headline"].lower()
+
+
+def test_compose_answer_card_for_insufficient_result_does_not_fake_metric():
+    result = {"success": True, "result_type": "empty", "result": None, "warnings": ["No result"]}
+    summary = {
+        "row_count": 0,
+        "top_item": None,
+        "primary_metric": None,
+        "primary_metric_value": None,
+        "has_chart": False,
+        "result_type": "python_empty",
+    }
+    quality = assess_result_quality(
+        tool_name="python_code_interpreter",
+        result=result,
+        result_summary=summary,
+    )
+
+    card = compose_answer_card(
+        question="Phân tích thử bằng Python",
+        tool_name="python_code_interpreter",
+        arguments={"code": "x = 1"},
+        result=result,
+        result_summary=summary,
+        result_quality=quality,
+    )
+    text = answer_card_to_text(card)
+
+    assert card["confidence"] == "low"
+    assert "chưa đủ dữ liệu" in card["headline"].lower()
+    assert "chỉ số = Không có dữ liệu" not in text
+    assert "metric = None" not in text

@@ -188,12 +188,20 @@ def semantic_target_summary(df: pd.DataFrame, profile, by_role: str | None = Non
     if by_role:
         by_col = _role_column(profile, by_role)
         if by_col:
-            temp = df[[by_col, target_col]].copy()
-            temp["_target_positive"] = temp[target_col].map(_is_positive)
+            # Extract as Series to handle duplicate column names safely
+            s_by = df[by_col].iloc[:, 0] if isinstance(df[by_col], pd.DataFrame) else df[by_col]
+            s_target = df[target_col].iloc[:, 0] if isinstance(df[target_col], pd.DataFrame) else df[target_col]
+            
+            temp = pd.DataFrame({
+                "by_val": s_by,
+                "target_val": s_target
+            })
+            temp["_target_positive"] = temp["target_val"].map(_is_positive)
             grouped = (
-                temp.groupby(by_col, dropna=False)
-                .agg(rows=(target_col, "count"), positive_rate=("_target_positive", "mean"))
+                temp.groupby("by_val", dropna=False)
+                .agg(rows=("target_val", "count"), positive_rate=("_target_positive", "mean"))
                 .reset_index()
+                .rename(columns={"by_val": by_col})
                 .sort_values("positive_rate", ascending=False)
                 .head(limit)
             )
@@ -671,7 +679,9 @@ def _role_column(profile, role: str) -> str | None:
     return match.column if match else None
 
 
-def _positive_rate(series: pd.Series) -> float:
+def _positive_rate(series: pd.Series | pd.DataFrame) -> float:
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
     if series.empty:
         return 0.0
     return float(series.map(_is_positive).mean())

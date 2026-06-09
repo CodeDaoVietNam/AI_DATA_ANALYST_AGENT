@@ -19,6 +19,7 @@ from app.services.llm.ollama_provider import OllamaProvider
 from app.services.metric_builder import evaluate_metric_summary, find_metric, metric_breakdown
 from app.services.profiler import infer_column_types
 from app.services.intent_planner import compile_intent_to_plan, parse_universal_intent
+from app.services.result_quality import assess_result_quality
 from app.services.semantic_mapper import DatasetSemanticProfile, build_semantic_profile
 from app.services.storage import DatasetStore, dataset_store
 from app.services.semantic_cache import semantic_cache_service
@@ -146,10 +147,22 @@ class AgentOrchestrator:
         question: str,
         mode: str = "balanced",
         event_callback: Callable[[str, dict[str, Any]], None] | None = None,
+        conversation_history: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
         timeline: list[dict[str, Any]] = []
-        cache_info: dict[str, Any] = {"semantic_profile": "miss", "tool_results": []}
+        cache_info: dict[str, Any] = {
+            "semantic_cache": {
+                "status": "miss",
+                "reason": "Not queried",
+                "similarity": None
+            },
+            "tool_result_cache": {
+                "status": "miss"
+            },
+            "semantic_profile": "miss",
+            "tool_results": []
+        }
         latency: dict[str, Any] = {}
 
         def emit(event: str, payload: dict[str, Any]) -> None:
@@ -160,11 +173,23 @@ class AgentOrchestrator:
         emit("progress", {"step": "received_question", "message": "Question received."})
 
         # --- 🚀 TÍCH HỢP SEMANTIC CACHE (PHẢN HỒI DƯỚI 50MS) ---
-        cached_response = semantic_cache_service.query_cache(dataset_id, question)
+        cached_response, cache_report = semantic_cache_service.query_cache_detailed(dataset_id, question)
+        cache_info = {
+            "semantic_cache": cache_report,
+            "tool_result_cache": {"status": "miss"},
+            "semantic_profile": "miss",
+            "tool_results": []
+        }
         if cached_response:
             latency["total_ms"] = _elapsed_ms(started_at)
             cached_response["latency"] = {**cached_response.get("latency", {}), "total_ms": latency["total_ms"]}
             cached_response["execution_timeline"] = timeline
+            cached_response["cache"] = {
+                "semantic_cache": cache_report,
+                "tool_result_cache": {"status": "hit"},
+                "semantic_profile": "hit",
+                "tool_results": []
+            }
             _timeline(timeline, started_at, "completed", "ok", f"Served from semantic cache: {cached_response.get('explanation_source')}")
             emit("progress", {"step": "completed", "message": f"Response served instantly from Semantic Cache ({cached_response.get('explanation_source')})."})
             emit("final", cached_response)
@@ -193,8 +218,13 @@ class AgentOrchestrator:
         if ecommerce_available:
             tool_specs.update(ECOMMERCE_TOOL_SPECS)
 
+        # --- Build compact conversation context for follow-up resolution ---
+        conv_context = _build_conversation_context(conversation_history or [], question)
+        enriched_question = conv_context["enriched_question"]
+        emit("progress", {"step": "resolving_context", "message": conv_context["context_note"]})
+
         plan_started = time.perf_counter()
-        plan, plan_warnings = self._build_plan(question, raw_df, column_types, ecommerce_available, semantic_profile, custom_metrics, tool_specs, mode)
+        plan, plan_warnings = self._build_plan(enriched_question, raw_df, column_types, ecommerce_available, semantic_profile, custom_metrics, tool_specs, mode)
         latency["planning_ms"] = _elapsed_ms(plan_started)
         if plan_warnings:
             _timeline(timeline, started_at, "fallback_tool", "ok", "Falling back to a safe deterministic plan.", {"warnings": plan_warnings})
@@ -238,6 +268,7 @@ class AgentOrchestrator:
                 _timeline(timeline, started_at, "tool_finished", "ok", f"Công cụ `{tool_name}` đã chạy xong.", {"tool_name": tool_name, "execution_ms": execution_ms, "cache": cache_info["tool_results"][-1]["cache"]})
                 emit("tool_finished", {"index": index, "tool_name": tool_name, "execution_ms": execution_ms, "summary": _result_summary(result, tool_name), "cache": cache_info["tool_results"][-1]["cache"]})
             except Exception as exc:
+                cache_info["tool_result_cache"]["status"] = "error"
                 _timeline(timeline, started_at, "tool_failed", "error", str(exc), {"tool_name": tool_name, "arguments": arguments})
                 error_response = _tool_error_response(tool_name, arguments, exc, timeline, started_at)
                 error_response["tool_calls"] = tool_calls
@@ -255,26 +286,38 @@ class AgentOrchestrator:
         if len(results) > 1:
             chart_val = next((item["result"] for item in results if item["tool_name"] == "generate_chart_spec"), None)
 
-        result_summary = _result_summary(primary_result, primary_tool if len(results) == 1 else "multi_step")
+        effective_tool = primary_tool if len(results) == 1 else "multi_step"
+        result_summary = _result_summary(primary_result, effective_tool)
+        result_quality = assess_result_quality(
+            tool_name=effective_tool,
+            result=primary_result,
+            result_summary=result_summary,
+        )
         emit("explanation_started", {"message": "Preparing explanation."})
         explain_started = time.perf_counter()
         explanation = self._explain_result(
             question,
-            primary_tool if len(results) == 1 else "multi_step",
+            effective_tool,
             primary_args,
             primary_result,
             result_summary,
             mode,
             semantic_profile,
             plan_warnings,
+            result_quality,
         )
         latency["explanation_ms"] = _elapsed_ms(explain_started)
 
         answer = explanation["answer"]
         answer_card = explanation.get("answer_card")
-        quick_actions = _quick_actions(primary_tool if len(results) == 1 else "multi_step", primary_result, result_summary)
+        quick_actions = _quick_actions(effective_tool, primary_result, result_summary)
         _timeline(timeline, started_at, "prepared_explanation", "ok", f"Prepared answer with {explanation['source']}.", {"explanation_source": explanation["source"]})
         warnings = [*plan_warnings, *explanation.get("warnings", [])]
+        warnings.extend(result_quality.warnings)
+        if effective_tool == "python_code_interpreter" and result_quality.status in {"empty", "insufficient"}:
+            warnings.append("Python analysis đã chạy nhưng không tạo ra output có cấu trúc. Hãy set biến `result` thành DataFrame/list/dict/scalar hoặc hỏi theo metric cụ thể hơn.")
+        if cache_info.get("semantic_cache", {}).get("status") in ("skipped", "error"):
+            warnings.append("Semantic cache bị bỏ qua vì embedding model chưa sẵn sàng; hệ thống vẫn tính mới bình thường.")
         if _result_mentions_missing_amount(primary_result):
             warnings.append("Doanh thu được tính từ các giá trị amount hiện có; một số dòng đang thiếu amount.")
             if answer_card:
@@ -283,6 +326,7 @@ class AgentOrchestrator:
                     answer_card["data_warnings"].append("Doanh thu được tính từ các giá trị amount hiện có; một số dòng đang thiếu amount.")
         if hasattr(self.provider, "router_model") and cache_info.get("router_fallback"):
             warnings.append(str(cache_info["router_fallback"]))
+
 
         latency["total_ms"] = _elapsed_ms(started_at)
         _timeline(timeline, started_at, "completed", "ok", "Agent response completed.")
@@ -297,10 +341,13 @@ class AgentOrchestrator:
             "warnings": warnings,
             "execution_timeline": timeline,
             "result_summary": result_summary,
+            "result_quality": result_quality.to_dict(),
             "explanation_source": explanation["source"],
             "quick_actions": quick_actions,
             "latency": latency,
             "cache": cache_info,
+            "conversation_context_used": conv_context["conversation_context_used"],
+            "resolved_references": conv_context["resolved_references"],
         }
         # --- 🚀 LƯU VÀO SEMANTIC CACHE CHO LẦN SAU ---
         semantic_cache_service.add_to_cache(dataset_id, question, response)
@@ -309,7 +356,13 @@ class AgentOrchestrator:
         emit("final", response)
         return response
 
-    def stream_chat(self, dataset_id: str, question: str, mode: str = "balanced") -> Iterable[dict[str, Any]]:
+    def stream_chat(
+        self,
+        dataset_id: str,
+        question: str,
+        mode: str = "balanced",
+        conversation_history: list[dict[str, Any]] | None = None,
+    ) -> Iterable[dict[str, Any]]:
         events: queue.Queue[dict[str, Any]] = queue.Queue()
 
         def emit(event: str, payload: dict[str, Any]) -> None:
@@ -317,7 +370,7 @@ class AgentOrchestrator:
 
         def runner() -> None:
             try:
-                self.chat(dataset_id, question, mode=mode, event_callback=emit)
+                self.chat(dataset_id, question, mode=mode, event_callback=emit, conversation_history=conversation_history)
             except Exception as exc:
                 emit("error", {"answer": f"Mình chưa chạy được câu hỏi này: {exc}", "warnings": [str(exc)]})
             finally:
@@ -405,7 +458,9 @@ class AgentOrchestrator:
             "user_question": question,
             "rules": [
                 "Return only valid JSON matching the output_schema.",
-                "Choose exactly one allowed tool. If a specific tool fits (e.g. retail, marketing, or HR tools), use it first. If no specialized tool fits, use 'python_code_interpreter' with custom pandas code.",
+                "Choose exactly one allowed tool. If a specific tool fits (e.g. retail, marketing, or HR tools), use it first.",
+                "If no specialized tool fits, prefer semantic_overview, get_dataset_overview, get_missing_values, groupby_aggregate, semantic_breakdown, semantic_time_series, correlation_analysis, or chart tools.",
+                "Use 'python_code_interpreter' only when the user explicitly requests a custom calculation that available deterministic tools cannot express.",
                 "When using 'python_code_interpreter', write a valid, single-step python/pandas expression in the 'code' argument. The pandas dataframe is preloaded as 'df'.",
                 "Ensure any generated pandas code uses exact columns from the provided list. E.g., for HR attrition, use columns like 'Attrition', 'MonthlyIncome', 'Department', 'JobRole', 'YearsAtCompany', 'OverTime' exactly as they are capitalized.",
                 "For Aggregations: always aggregate numeric metrics (like MonthlyIncome, YearsAtCompany, Salary, Revenue) by categorical groups.",
@@ -538,7 +593,7 @@ class AgentOrchestrator:
         for retry_count in range(3):
             run_result = execute_pandas_code(raw_df, current_code)
             if run_result["success"]:
-                return {"stdout": run_result["stdout"], "result": run_result["result"], "code_executed": current_code}
+                return {**run_result, "code_executed": current_code}
             if retry_count == 2 or not run_result.get("traceback"):
                 raise ValueError(run_result["error"])
             debug_prompt = [
@@ -562,6 +617,7 @@ class AgentOrchestrator:
         mode: str,
         semantic_profile: DatasetSemanticProfile | None,
         warnings: list[str] | None = None,
+        result_quality: Any | None = None,
     ) -> dict[str, Any]:
         deterministic_card = compose_answer_card(
             question=question,
@@ -571,9 +627,12 @@ class AgentOrchestrator:
             result_summary=result_summary,
             semantic_profile=semantic_profile,
             warnings=warnings or [],
+            result_quality=result_quality,
             answer_source="deterministic_composer",
         )
         deterministic_answer = answer_card_to_text(deterministic_card)
+        if result_quality is not None and getattr(result_quality, "status", None) in {"empty", "insufficient", "tool_error"}:
+            return {"answer": deterministic_answer, "answer_card": deterministic_card, "source": "deterministic_fallback", "warnings": []}
         if mode == "fast":
             return {"answer": deterministic_answer, "answer_card": deterministic_card, "source": "deterministic_fallback", "warnings": []}
         explain_result = _compact_result_for_llm(result)
@@ -585,12 +644,14 @@ class AgentOrchestrator:
             "semantic_roles": _compact_semantic_profile(semantic_profile) if semantic_profile else {},
             "deterministic_answer_card": deterministic_card,
             "tool_result": explain_result,
+            "result_quality": result_quality.to_dict() if hasattr(result_quality, "to_dict") else result_quality,
             "rules": [
                 "BẮT BUỘC trả ONLY valid JSON theo schema AnswerCard. Không markdown, không text ngoài JSON.",
                 "Viết hoàn toàn bằng Tiếng Việt chuyên nghiệp, thân thiện.",
                 "Chỉ được polish headline, summary, key_takeaways, why_it_matters, recommended_next_questions.",
                 "Không thay evidence, data_warnings, calculation_notes từ deterministic_answer_card.",
                 "Tuyệt đối không bịa số liệu hoặc thêm số ngoài tool_result/deterministic_answer_card.",
+                "Nếu result_quality không phải strong, không được trình bày như một kết luận chắc chắn.",
             ],
         }
         messages = [
@@ -802,6 +863,22 @@ def _result_summary(result: Any, tool_name: str) -> dict[str, Any]:
     if isinstance(result, dict):
         if has_chart:
             return {"row_count": len(result.get("data", [])) if isinstance(result.get("data"), list) else None, "top_item": None, "primary_metric": "chart_traces", "primary_metric_value": len(result.get("data", [])) if isinstance(result.get("data"), list) else None, "has_chart": True, "result_type": "chart"}
+        if tool_name == "python_code_interpreter" or "result_type" in result:
+            nested_rows = result.get("result") if isinstance(result.get("result"), list) else None
+            top_item = nested_rows[0] if nested_rows else None
+            metric, value = _best_metric(top_item or {})
+            if metric == "value" and value is None and isinstance(result.get("metrics"), dict):
+                metric, value = _best_metric(result["metrics"])
+            if metric == "value" and value is None and isinstance(result.get("result"), dict):
+                metric, value = _best_metric(result["result"])
+            return {
+                "row_count": result.get("row_count") if isinstance(result.get("row_count"), int) else (len(nested_rows) if nested_rows is not None else None),
+                "top_item": top_item,
+                "primary_metric": None if metric == "value" and value is None else metric,
+                "primary_metric_value": value,
+                "has_chart": False,
+                "result_type": f"python_{result.get('result_type', 'result')}" if tool_name == "python_code_interpreter" else str(result.get("result_type", "dict")),
+            }
         rows = result.get("items") if isinstance(result.get("items"), list) else None
         if rows is not None:
             top_item = rows[0] if rows else None
@@ -896,6 +973,11 @@ def _matching_custom_metric(text: str, custom_metrics: list[dict[str, Any]]) -> 
 def _tool_error_response(tool_name: str, arguments: dict[str, Any], exc: Exception, timeline: list[dict[str, Any]], started_at: float) -> dict[str, Any]:
     _timeline(timeline, started_at, "completed", "error", "Agent response completed with a tool error.")
     answer_card = compose_tool_error_card(tool_name, arguments, str(exc))
+    result_quality = assess_result_quality(
+        tool_name=tool_name,
+        result={"success": False, "error": str(exc), "result": None},
+        result_summary={"row_count": None, "top_item": None, "primary_metric": None, "primary_metric_value": None, "has_chart": False, "result_type": "error"},
+    )
     return {
         "answer": answer_card_to_text(answer_card),
         "answer_card": answer_card,
@@ -905,6 +987,7 @@ def _tool_error_response(tool_name: str, arguments: dict[str, Any], exc: Excepti
         "warnings": [str(exc)],
         "execution_timeline": timeline,
         "result_summary": {"row_count": None, "top_item": None, "primary_metric": None, "primary_metric_value": None, "has_chart": False, "result_type": "error"},
+        "result_quality": result_quality.to_dict(),
         "explanation_source": "tool_error",
         "quick_actions": [{"action": "ask_followup", "label": "Hỏi lại rõ hơn", "payload": {"question": "Hãy tổng quan dataset này trước."}}],
     }
@@ -1014,3 +1097,69 @@ def _result_mentions_missing_amount(result: Any) -> bool:
     if isinstance(result, list):
         return any(_result_mentions_missing_amount(item) for item in result)
     return False
+
+
+def _build_conversation_context(history: list[dict[str, Any]], question: str) -> dict[str, Any]:
+    normalized = _normalize_question(question)
+    pronouns = ["no", "nhom do", "sku do", "so sanh voi thang truoc", "tiep", "drill down", "do", "tinh do", "bang do", "nhom nay", "sku nay", "san pham do", "san pham nay"]
+    needs_context = any(p in normalized for p in pronouns)
+
+    resolved_entity = None
+    resolved_entity_type = None
+    context_note = "Không dùng ngữ cảnh hội thoại."
+    
+    # Take up to last 5 assistant messages
+    assistant_msgs = [m for m in history if m.get("role") == "assistant"]
+    last_assistant = assistant_msgs[-1] if assistant_msgs else None
+
+    if needs_context and last_assistant:
+        card = last_assistant.get("answer_card")
+        summary = last_assistant.get("result_summary")
+
+        if card and card.get("evidence"):
+            for ev in card["evidence"]:
+                val = ev.get("value")
+                lbl = ev.get("label", "").lower()
+                if val and any(t in lbl for t in ["sku", "nhom", "category", "bang", "tinh", "state", "city", "phong ban", "department", "chien dich", "campaign"]):
+                    resolved_entity = val
+                    resolved_entity_type = ev.get("label")
+                    break
+
+        if not resolved_entity and summary and summary.get("top_item"):
+            top = summary["top_item"]
+            if isinstance(top, dict):
+                for k, v in top.items():
+                    k_low = k.lower()
+                    if any(t in k_low for t in ["sku", "category", "state", "city", "department", "campaign", "col", "nhom"]):
+                        resolved_entity = str(v)
+                        resolved_entity_type = k
+                        break
+                if not resolved_entity and len(top) > 0:
+                    resolved_entity = str(next(iter(top.values())))
+                    resolved_entity_type = next(iter(top.keys()))
+            else:
+                resolved_entity = str(top)
+                resolved_entity_type = "mục"
+
+        if resolved_entity:
+            enriched = question
+            for pr in ["sku đó", "SKU đó", "nhóm đó", "cột đó", "nó", "bang đó", "tỉnh đó", "đối tượng đó", "chiến dịch đó", "sản phẩm đó"]:
+                if pr in enriched:
+                    enriched = enriched.replace(pr, f"{resolved_entity}")
+            if enriched == question:
+                enriched = f"{question} (liên quan đến {resolved_entity_type}: {resolved_entity})"
+            
+            context_note = f"Đã sử dụng ngữ cảnh: {resolved_entity_type} = {resolved_entity}"
+            return {
+                "enriched_question": enriched,
+                "context_note": context_note,
+                "conversation_context_used": True,
+                "resolved_references": [resolved_entity]
+            }
+
+    return {
+        "enriched_question": question,
+        "context_note": context_note,
+        "conversation_context_used": False,
+        "resolved_references": []
+    }

@@ -443,7 +443,13 @@ def generate_chart(request: ChartRequest):
 @app.post("/agent/chat", response_model=AgentChatResponse)
 def agent_chat(request: AgentChatRequest):
     try:
-        result = agent_orchestrator.chat(request.dataset_id, request.question, mode=request.mode)
+        conv_hist = [msg.model_dump() for msg in request.conversation_history] if request.conversation_history else None
+        result = agent_orchestrator.chat(
+            request.dataset_id,
+            request.question,
+            mode=request.mode,
+            conversation_history=conv_hist
+        )
         return AgentChatResponse(**result)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -453,7 +459,13 @@ def agent_chat(request: AgentChatRequest):
 def agent_chat_stream(request: AgentChatRequest):
     def event_stream():
         try:
-            for event in agent_orchestrator.stream_chat(request.dataset_id, request.question, mode=request.mode):
+            conv_hist = [msg.model_dump() for msg in request.conversation_history] if request.conversation_history else None
+            for event in agent_orchestrator.stream_chat(
+                request.dataset_id,
+                request.question,
+                mode=request.mode,
+                conversation_history=conv_hist
+            ):
                 yield f"event: {event['event']}\n"
                 yield f"data: {json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
         except Exception as exc:

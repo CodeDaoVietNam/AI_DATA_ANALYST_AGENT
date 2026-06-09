@@ -35,69 +35,126 @@ class LocalSemanticCacheService:
                 embeddings = data.get("embeddings")
                 if embeddings and isinstance(embeddings, list) and len(embeddings) > 0:
                     return embeddings[0]
+            logger.warning("embedding unavailable: Ollama response status code not 200 or embeddings empty")
             return None
         except Exception as exc:
-            logger.warning(f"Failed to generate embedding for cache: {exc}")
+            logger.warning(f"embedding unavailable: Failed to generate embedding for cache: {exc}")
             return None
 
-    def query_cache(self, dataset_id: str, question: str, threshold: float = 0.88) -> dict[str, Any] | None:
-        # First, attempt to get embedding for the query
-        current_embedding = self.get_embedding(question)
+    def query_cache_detailed(self, dataset_id: str, question: str, threshold: float = 0.88) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        # Log embedding request
+        try:
+            current_embedding = self.get_embedding(question)
+        except Exception as e:
+            logger.error(f"Error getting embedding: {e}")
+            logger.info("cache lookup skipped due to error")
+            return None, {
+                "status": "error",
+                "reason": f"Error generating embedding: {str(e)}",
+                "similarity": None
+            }
+
         if not current_embedding:
-            # Fallback to exact keyword matching if embedding service is down
-            with SessionLocal() as db:
-                cached = (
-                    db.query(SemanticCache)
-                    .filter(
-                        SemanticCache.dataset_id == dataset_id,
-                        SemanticCache.question == question
+            logger.info("embedding unavailable: cache lookup skipped")
+            # Fallback to exact keyword matching
+            try:
+                with SessionLocal() as db:
+                    cached = (
+                        db.query(SemanticCache)
+                        .filter(
+                            SemanticCache.dataset_id == dataset_id,
+                            SemanticCache.question == question
+                        )
+                        .first()
                     )
-                    .first()
-                )
-                if cached:
-                    try:
+                    if cached:
                         res = json.loads(cached.response_json)
                         res["explanation_source"] = "semantic_cache_exact"
-                        return res
-                    except Exception:
-                        return None
-            return None
+                        logger.info(f"Semantic Cache HIT! (Exact match) for question: '{question}'")
+                        return res, {
+                            "status": "hit",
+                            "reason": "Exact match found without embedding",
+                            "similarity": 1.0
+                        }
+            except Exception as e:
+                logger.error(f"Exact match check failed: {e}")
+                return None, {
+                    "status": "error",
+                    "reason": f"Exact match failed: {str(e)}",
+                    "similarity": None
+                }
+            
+            return None, {
+                "status": "skipped",
+                "reason": "Embedding model unavailable",
+                "similarity": None
+            }
 
         # Compare cosine similarity with all cached entries for this dataset
         best_similarity = -1.0
         best_cached = None
 
-        with SessionLocal() as db:
-            records = db.query(SemanticCache).filter(SemanticCache.dataset_id == dataset_id).all()
-            for record in records:
-                try:
-                    cached_emb = json.loads(record.embedding_json)
-                    sim = cosine_similarity(current_embedding, cached_emb)
-                    if sim > best_similarity:
-                        best_similarity = sim
-                        best_cached = record
-                except Exception as exc:
-                    logger.warning(f"Error parsing cached embedding: {exc}")
-                    continue
+        try:
+            with SessionLocal() as db:
+                records = db.query(SemanticCache).filter(SemanticCache.dataset_id == dataset_id).all()
+                for record in records:
+                    try:
+                        cached_emb = json.loads(record.embedding_json)
+                        sim = cosine_similarity(current_embedding, cached_emb)
+                        if sim > best_similarity:
+                            best_similarity = sim
+                            best_cached = record
+                    except Exception as exc:
+                        logger.warning(f"Error parsing cached embedding: {exc}")
+                        continue
+        except Exception as e:
+            logger.error(f"Failed to query semantic cache database: {e}")
+            logger.info("cache lookup skipped: database query failed")
+            return None, {
+                "status": "error",
+                "reason": f"Database query failed: {str(e)}",
+                "similarity": None
+            }
 
         if best_cached and best_similarity >= threshold:
             try:
                 res = json.loads(best_cached.response_json)
                 res["explanation_source"] = f"semantic_cache (similarity: {best_similarity:.2f})"
                 logger.info(f"Semantic Cache HIT! Match score: {best_similarity:.4f} for question: '{question}'")
-                return res
-            except Exception:
-                pass
-        return None
+                return res, {
+                    "status": "hit",
+                    "reason": f"Match score: {best_similarity:.4f}",
+                    "similarity": round(best_similarity, 4)
+                }
+            except Exception as e:
+                logger.error(f"Error loading response from hit: {e}")
+                return None, {
+                    "status": "error",
+                    "reason": f"JSON parse of cached response failed: {str(e)}",
+                    "similarity": round(best_similarity, 4)
+                }
+
+        logger.info(f"Semantic Cache MISS. Best score: {best_similarity:.4f} for question: '{question}'")
+        return None, {
+            "status": "miss",
+            "reason": f"Best similarity score: {best_similarity:.4f} below threshold {threshold}",
+            "similarity": round(best_similarity, 4) if best_similarity >= 0 else None
+        }
+
+    def query_cache(self, dataset_id: str, question: str, threshold: float = 0.88) -> dict[str, Any] | None:
+        res, _ = self.query_cache_detailed(dataset_id, question, threshold)
+        return res
 
     def add_to_cache(self, dataset_id: str, question: str, response: dict[str, Any]) -> None:
         try:
             # Avoid caching errors
             if "error" in response:
+                logger.info("cache write skipped: response contains error")
                 return
 
             embedding = self.get_embedding(question)
             if not embedding:
+                logger.info("cache write skipped: embedding unavailable")
                 return
 
             # Clean large raw dataset in the response cache if necessary to save DB space

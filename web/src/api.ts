@@ -131,11 +131,16 @@ export function generateChart(payload: {
   });
 }
 
-export function askAgent(datasetId: string, question: string): Promise<AgentResponse> {
+export function askAgent(datasetId: string, question: string, conversationHistory?: any[]): Promise<AgentResponse> {
   return requestJson<AgentResponse>("/agent/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dataset_id: datasetId, question, mode: "balanced" }),
+    body: JSON.stringify({
+      dataset_id: datasetId,
+      question,
+      mode: "balanced",
+      conversation_history: conversationHistory || [],
+    }),
   });
 }
 
@@ -143,6 +148,7 @@ export async function askAgentStream(
   datasetId: string,
   question: string,
   onEvent: (event: string, data: Record<string, unknown>) => void,
+  conversationHistory?: any[],
 ): Promise<AgentResponse> {
   const headers = new Headers({ "Content-Type": "application/json" });
   if (API_KEY) {
@@ -155,7 +161,12 @@ export async function askAgentStream(
       response = await fetch(`${baseUrl}/agent/chat/stream`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ dataset_id: datasetId, question, mode: "balanced" }),
+        body: JSON.stringify({
+          dataset_id: datasetId,
+          question,
+          mode: "balanced",
+          conversation_history: conversationHistory || [],
+        }),
       });
       break;
     } catch (error) {

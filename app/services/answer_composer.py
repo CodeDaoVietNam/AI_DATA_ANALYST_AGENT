@@ -12,12 +12,24 @@ def compose_answer_card(
     result_summary: dict[str, Any] | None,
     semantic_profile: Any | None = None,
     warnings: list[str] | None = None,
+    result_quality: Any | None = None,
     answer_source: str = "deterministic_composer",
 ) -> dict[str, Any]:
     """Create a product-grade, JSON-safe answer card from deterministic tool output."""
     arguments = arguments or {}
     result_summary = result_summary or {}
     warnings = warnings or []
+    if _is_weak_quality(result_quality):
+        return _insufficient_result_card(
+            question=question,
+            tool_name=tool_name,
+            arguments=arguments,
+            result=result,
+            result_summary=result_summary,
+            result_quality=result_quality,
+            warnings=warnings,
+            answer_source=answer_source,
+        )
     rows = _extract_rows(result)
     top_item = result_summary.get("top_item") or (rows[0] if rows else None)
     label = _best_label(top_item) if isinstance(top_item, dict) else None
@@ -111,6 +123,80 @@ def merge_llm_answer_card(base_card: dict[str, Any], llm_card: dict[str, Any]) -
     return merged
 
 
+def _insufficient_result_card(
+    *,
+    question: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    result: Any,
+    result_summary: dict[str, Any],
+    result_quality: Any,
+    warnings: list[str],
+    answer_source: str,
+) -> dict[str, Any]:
+    quality = _quality_dict(result_quality)
+    quality_warnings = [str(item) for item in quality.get("warnings", []) if item]
+    row_count = quality.get("row_count", result_summary.get("row_count"))
+    reason = quality.get("reason") or "Tool result chưa có cấu trúc đủ rõ để tạo kết luận."
+    data_warnings = list(dict.fromkeys([
+        *warnings,
+        *quality_warnings,
+        "Tool result không có metric, bảng hoặc nhóm nổi bật đủ rõ để kết luận chắc chắn.",
+    ]))
+    evidence = [
+        {
+            "label": "Công cụ đã chạy",
+            "value": _humanize_tool_name(tool_name),
+            "description": "Backend đã thực thi công cụ deterministic, nhưng output chưa đủ rõ để tạo insight.",
+        },
+        {
+            "label": "Trạng thái kết quả",
+            "value": "Chưa đủ dữ liệu để kết luận",
+            "description": str(reason),
+        },
+    ]
+    if row_count is not None:
+        evidence.append({
+            "label": "Số dòng kết quả",
+            "value": _format_value(row_count),
+            "description": "Số dòng usable mà tool trả về.",
+        })
+    if isinstance(result, dict) and result.get("result_type"):
+        evidence.append({
+            "label": "Kiểu output",
+            "value": str(result.get("result_type")),
+            "description": "Schema output từ công cụ phân tích.",
+        })
+
+    return {
+        "headline": "Mình đã chạy phân tích, nhưng chưa đủ dữ liệu rõ để kết luận.",
+        "summary": f"Công cụ `{_humanize_tool_name(tool_name)}` đã hoàn tất, nhưng kết quả không có metric/top item/bảng đủ rõ. Mình sẽ không suy diễn insight khi evidence còn yếu.",
+        "key_takeaways": [
+            {
+                "label": "Chưa đủ evidence",
+                "text": "Không có metric hoặc nhóm nổi bật đáng tin, nên hệ thống không nên gọi đây là kết luận kinh doanh.",
+                "tone": "warning",
+            },
+            {
+                "label": "Cách hỏi lại",
+                "text": "Hãy nêu rõ metric và dimension, ví dụ: doanh thu theo category, margin theo segment, hoặc missing values theo cột.",
+                "tone": "neutral",
+            },
+        ],
+        "evidence": evidence[:6],
+        "why_it_matters": "Nếu không có evidence rõ, hệ thống cần nói thật về giới hạn thay vì tạo kết luận giả. Đây là lớp bảo vệ trust cho Copilot.",
+        "recommended_next_questions": _insufficient_next_questions(tool_name, question, arguments),
+        "confidence": "low",
+        "answer_source": answer_source,
+        "data_warnings": data_warnings[:6],
+        "calculation_notes": [
+            f"Kết quả được tính bằng công cụ deterministic `{_humanize_tool_name(tool_name)}`.",
+            f"Tham số công cụ: {arguments}." if arguments else "Công cụ không nhận tham số đặc biệt.",
+            "Nếu dùng Python sandbox, code nên set biến `result` thành DataFrame/list/dict/scalar để UI render được.",
+        ],
+    }
+
+
 def compose_tool_error_card(tool_name: str, arguments: dict[str, Any], error: str) -> dict[str, Any]:
     card = {
         "headline": "Mình chưa chạy được phân tích này.",
@@ -148,6 +234,8 @@ def _headline(tool_name: str, label: str | None, metric: str | None, metric_valu
     if "overview" in tool_name:
         return f"Dataset {domain} đã được tóm tắt ở mức tổng quan."
     if isinstance(result, dict) and not _extract_rows(result):
+        if not metric or not _is_present_metric(metric_value):
+            return "Mình đã chạy phân tích, nhưng chưa đủ dữ liệu rõ để kết luận."
         return f"Kết quả nổi bật nhất là {_humanize(metric or 'metric')} = {_format_value(metric_value)}."
     return f"{label_text} đang dẫn đầu theo {metric_text}."
 
@@ -157,6 +245,8 @@ def _summary(tool_name: str, label: str | None, metric: str | None, metric_value
         return f"Công cụ `{_humanize_tool_name(tool_name)}` trả về {len(rows)} dòng kết quả; dòng nổi bật nhất là `{label}` với {_humanize(metric or 'metric')} = {_format_value(metric_value)}."
     if isinstance(result, dict):
         metric_name, value = _best_metric(result)
+        if not metric_name or not _is_present_metric(value):
+            return f"Công cụ `{_humanize_tool_name(tool_name)}` đã chạy xong, nhưng output chưa có chỉ số nổi bật đủ rõ để kết luận."
         return f"Công cụ `{_humanize_tool_name(tool_name)}` đã chạy xong; chỉ số nổi bật là {_humanize(metric_name or 'metric')} = {_format_value(value)}."
     return f"Công cụ `{_humanize_tool_name(tool_name)}` đã chạy xong và trả về kết quả có thể dùng để phân tích tiếp."
 
@@ -288,7 +378,7 @@ def _extract_rows(result: Any) -> list[dict[str, Any]]:
     if isinstance(result, list):
         return [row for row in result if isinstance(row, dict)]
     if isinstance(result, dict):
-        for key in ["items", "rows"]:
+        for key in ["items", "rows", "result"]:
             value = result.get(key)
             if isinstance(value, list):
                 return [row for row in value if isinstance(row, dict)]
@@ -322,12 +412,67 @@ def _best_metric(row: dict[str, Any] | None) -> tuple[str | None, Any]:
         "cancel_rate", "attrition_rate", "positive_rate", "response_rate", "missing_percent", "duplicate_rows",
     ]
     for key in preferred:
-        if key in row and isinstance(row.get(key), (int, float)):
+        if key in row and isinstance(row.get(key), (int, float)) and _is_present_metric(row.get(key)):
             return key, row.get(key)
     for key, value in row.items():
-        if isinstance(value, (int, float)):
+        if isinstance(value, (int, float)) and _is_present_metric(value):
             return key, value
     return None, None
+
+
+def _is_present_metric(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value == value
+    return False
+
+
+def _is_weak_quality(result_quality: Any | None) -> bool:
+    if result_quality is None:
+        return False
+    quality = _quality_dict(result_quality)
+    status = quality.get("status")
+    if status in {"empty", "insufficient", "tool_error"}:
+        return True
+    if status == "partial" and not (quality.get("has_metric") and quality.get("has_label")):
+        return True
+    return False
+
+
+def _quality_dict(result_quality: Any) -> dict[str, Any]:
+    if isinstance(result_quality, dict):
+        return result_quality
+    if hasattr(result_quality, "to_dict"):
+        return result_quality.to_dict()
+    return {
+        key: getattr(result_quality, key)
+        for key in [
+            "status", "reason", "has_rows", "row_count", "has_metric", "metric_name",
+            "metric_value", "has_label", "label", "render_mode", "warnings",
+        ]
+        if hasattr(result_quality, key)
+    }
+
+
+def _insufficient_next_questions(tool_name: str, question: str, arguments: dict[str, Any]) -> list[str]:
+    if tool_name == "python_code_interpreter":
+        return [
+            "Hãy tổng quan dataset này trước.",
+            "Metric chính bạn muốn phân tích là gì?",
+            "Bạn muốn breakdown theo cột nào?",
+        ]
+    if "chart" in tool_name:
+        return [
+            "Hãy vẽ biểu đồ với một cột category và một cột numeric cụ thể.",
+            "Cột nào có thể dùng làm metric chính?",
+            "Hãy tổng quan dataset này trước.",
+        ]
+    return [
+        "Hãy tổng quan dataset này trước.",
+        "Cột nào thiếu dữ liệu nhiều nhất?",
+        "Metric chính bạn muốn phân tích là gì?",
+    ]
 
 
 def _format_value(value: Any) -> str:
@@ -412,6 +557,7 @@ def _humanize_tool_name(tool_name: str) -> str:
         "top_skus_by_revenue": "top SKU theo doanh thu",
         "category_cancellation_summary": "rủi ro hủy theo category",
         "generate_chart_spec": "tạo biểu đồ",
+        "python_code_interpreter": "công cụ Python sandbox",
     }
     return labels.get(tool_name, tool_name.replace("_", " "))
 

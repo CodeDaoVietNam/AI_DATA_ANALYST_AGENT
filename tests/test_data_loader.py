@@ -12,6 +12,14 @@ def test_load_csv_file():
     assert df.shape == (1, 2)
 
 
+def test_load_csv_file_with_windows_1252_smart_quote():
+    content = "name,notes\nA,O\u2019Reilly\n".encode("cp1252")
+
+    df = load_tabular_file(content, "windows.csv")
+
+    assert df.loc[0, "notes"] == "O\u2019Reilly"
+
+
 def test_load_xls_superstore_file_if_available():
     path = Path("data/raw/sample_-_superstore.xls")
     if not path.exists():

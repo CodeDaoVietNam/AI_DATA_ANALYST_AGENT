@@ -8,7 +8,7 @@ export type UploadResponse = {
 
 export type RecordRow = Record<string, unknown>;
 
-export type Section = "upload" | "overview" | "quality" | "dashboard" | "ecommerce" | "charts" | "ask" | "report";
+export type Section = "upload" | "profile" | "dashboard" | "ask" | "report";
 
 export type ItemsResponse = {
   dataset_id: string;
@@ -80,6 +80,20 @@ export type AnswerCard = {
   calculation_notes: string[];
 };
 
+export type ResultQuality = {
+  status: "strong" | "partial" | "empty" | "insufficient" | "tool_error";
+  reason: string;
+  has_rows: boolean;
+  row_count?: number | null;
+  has_metric: boolean;
+  metric_name?: string | null;
+  metric_value?: unknown;
+  has_label: boolean;
+  label?: string | null;
+  render_mode: string;
+  warnings: string[];
+};
+
 export type AgentResponse = {
   answer: string;
   answer_card?: AnswerCard | null;
@@ -118,6 +132,7 @@ export type AgentResponse = {
     has_chart: boolean;
     result_type: string;
   } | null;
+  result_quality?: ResultQuality | null;
   explanation_source?: "llm" | "deterministic_fallback" | "tool_error";
   quick_actions?: Array<{
     action: "view_chart" | "export_result" | "ask_followup" | "add_to_report" | "explain_calculation";
@@ -125,7 +140,17 @@ export type AgentResponse = {
     payload: Record<string, unknown>;
   }>;
   latency?: Record<string, unknown>;
-  cache?: Record<string, unknown>;
+  cache?: {
+    semantic_cache?: {
+      status: "hit" | "miss" | "skipped" | "error";
+      similarity?: number | null;
+      reason?: string | null;
+    } | null;
+    tool_result_cache?: {
+      status: "hit" | "miss" | "skipped" | "error";
+    } | null;
+    hit?: boolean;
+  } | null;
 };
 
 export type AgentStatus = {

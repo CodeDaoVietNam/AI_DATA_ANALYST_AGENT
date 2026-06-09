@@ -152,6 +152,20 @@ class TestResponseStructure:
         result = orch.chat(dataset_id, "Tổng quan?")
         assert "total_ms" in result.get("latency", {})
 
+    def test_python_empty_result_returns_result_quality_and_skips_llm_explain(self, tmp_store):
+        df = _make_generic_df()
+        dataset_id = _save_df(tmp_store, df, "generic.csv")
+        route_json = json.dumps({"tool_name": "python_code_interpreter", "arguments": {"code": "x = 1"}})
+        mock = MockOllamaProvider(route_response=route_json)
+        orch = AgentOrchestrator(provider=mock, store=tmp_store)
+
+        result = orch.chat(dataset_id, "Chạy custom calculation thử nghiệm", mode="balanced")
+
+        assert result["result_quality"]["status"] == "empty"
+        assert result["explanation_source"] == "deterministic_fallback"
+        assert mock.explain_called == 0
+        assert "chỉ số = Không có dữ liệu" not in result["answer"]
+
 
 class TestChartOutput:
     def test_chart_request_returns_chart(self, tmp_store):
@@ -189,3 +203,39 @@ class TestStreamChat:
         events = list(orch.stream_chat(dataset_id, "Tổng quan?"))
         event_names = [e["event"] for e in events]
         assert "progress" in event_names
+
+
+class TestConversationContext:
+    def test_followup_context_resolves_pronoun(self, tmp_store):
+        df = _make_amazon_df()
+        dataset_id = _save_df(tmp_store, df, "amazon.csv")
+        mock = MockOllamaProvider(route_response=None)
+        orch = AgentOrchestrator(provider=mock, store=tmp_store)
+
+        # First question yields top SKU or category
+        history = [
+            {"role": "user", "content": "SKU nào doanh thu cao nhất?"},
+            {
+                "role": "assistant",
+                "content": "SKU có doanh thu cao nhất là SKU-B.",
+                "answer_card": {
+                    "headline": "SKU-B dẫn đầu",
+                    "summary": "Doanh thu cao nhất",
+                    "evidence": [
+                        {"label": "SKU", "value": "SKU-B"}
+                    ],
+                    "key_takeaways": [],
+                    "why_it_matters": "",
+                    "recommended_next_questions": []
+                },
+                "result_summary": {
+                    "top_item": {"SKU": "SKU-B"},
+                    "primary_metric": "Amount"
+                }
+            }
+        ]
+
+        # Follow-up question containing pronoun/SKU đó
+        result = orch.chat(dataset_id, "So sánh SKU đó theo tháng", conversation_history=history)
+        assert result["conversation_context_used"] is True
+        assert "SKU-B" in result["resolved_references"]
