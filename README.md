@@ -1,137 +1,102 @@
 # AI Data Analyst Agent
 
-AI Data Analyst Agent is a **production-style technical MVP** for uploading tabular datasets, generating domain-aware dashboards, and asking natural-language questions through a hybrid deterministic + LLM analytics layer.
+AI Data Analyst Agent is a full-stack analytics system that turns CSV/XLS/XLSX files into semantic dashboards, validated insights, charts, and AI-assisted business answers.
 
-It is strong enough for portfolio/demo/internal experimentation, but it is **not yet production-ready**. See [Production Readiness Roadmap](docs/15_production_readiness_roadmap_vi.md) for the remaining work.
+Unlike a simple chatbot over data, this project grounds answers in deterministic Pandas tools. The LLM is used for routing and explanation, while numbers come from validated backend tools.
 
-## Current Status
+> Status: production-style technical MVP for portfolio/demo/internal experimentation. It is not a production SaaS yet.
 
-| Area | Status |
+## Preview
+
+Add or replace these images with live screenshots from your machine:
+
+| Smart Dashboard | AI Copilot |
 |---|---|
-| Backend API | FastAPI app with upload, profiling, dashboard, chart, ecommerce, semantic profile, and AI chat endpoints |
-| Frontend | Vite React TypeScript dashboard with upload, overview, quality, smart dashboard, ecommerce, charts, Ask AI, report |
-| Data formats | CSV, XLS, XLSX |
-| Storage | Uploaded files saved as CSV in `data/uploads`; metadata stored with SQLite/SQLAlchemy |
-| AI layer | Ollama provider, rule-based routing, LLM routing, deterministic fallback, multi-step tool orchestration |
-| Dashboard | Backend-driven dashboard contract v2 with KPI cards, insight cards, charts, tables, warnings |
-| Semantic layer | Domain detection, role mapping, role candidates, confidence, user override |
-| Cache | In-memory TTL cache plus local semantic cache table for repeated questions |
-| Security | API key option, upload size limit, restricted CORS config, sandboxed code interpreter prototype |
-| Production readiness | Technical MVP, not full production SaaS yet |
+| ![Smart Dashboard](docs/assets/dashboard.svg) | ![AI Copilot](docs/assets/copilot.svg) |
 
-## Key Features
+| Semantic Mapping | Metric Builder |
+|---|---|
+| ![Semantic Mapping](docs/assets/semantic-mapping.svg) | ![Metric Builder](docs/assets/metric-builder.svg) |
 
-- Upload CSV/XLS/XLSX datasets.
-- Profile datasets and inspect missing values, duplicates, column types, and summaries.
-- Detect dataset domain:
-  - ecommerce
-  - retail
-  - marketing
-  - HR
-  - finance/generic fallback
-- Map columns to semantic roles such as revenue, profit, date, category, quantity, target, campaign, department.
-- Override semantic mapping from the React dashboard.
-- Generate backend-driven dashboards with:
-  - KPI cards
-  - insight cards
-  - Plotly charts
-  - tables
-  - warnings
-- Run ecommerce-specific analytics:
-  - revenue by category/month/state/city/SKU/size
-  - cancellation risk
-  - fulfilment/courier/promotion/B2B summaries
-- Run deeper domain analytics:
-  - retail margin/loss/discount/opportunity analysis
-  - marketing response/campaign/RFM/channel analysis
-  - HR attrition/income/tenure/high-risk segment analysis
-- Ask questions through AI Copilot:
-  - deterministic Pandas tools as source of truth
-  - Ollama explanation when available
-  - deterministic fallback when Ollama is unavailable
-  - Server-Sent Events progress stream
-  - multi-step tool plans for richer questions
-- Optional sandboxed Python/Pandas code execution for complex calculations.
+## What It Does
+
+- Upload CSV, XLS, and XLSX datasets.
+- Profile missing values, duplicates, column types, and data quality warnings.
+- Detect dataset domains such as ecommerce, retail, marketing, HR, finance, logistics, education, survey, product, and generic tabular data.
+- Map columns to semantic roles such as revenue, profit, date, category, quantity, city, campaign, department, salary, target, and conversion.
+- Let users upload/edit a data dictionary and override semantic mappings.
+- Define custom metrics such as `margin = profit / revenue`.
+- Build backend-driven dashboards with KPI cards, insight cards, Plotly charts, tables, warnings, and recommended next questions.
+- Ask questions through an AI Copilot with tool calling, deterministic fallback, result cards, timeline, quick actions, and optional Ollama explanations.
+- Run an evaluation suite across multi-domain datasets to measure semantic mapping, intent parsing, tool selection, numeric correctness, and latency.
+
+## Tech Stack
+
+| Layer | Stack |
+|---|---|
+| Backend | FastAPI, Pydantic, Pandas, NumPy, SQLAlchemy |
+| Frontend | Vite, React, TypeScript, Tailwind CSS, Plotly |
+| AI/LLM | Ollama local models, rule router, JSON tool planning, deterministic fallback |
+| Analytics | Semantic mapper, generic tools, ecommerce tools, retail/marketing/HR tools, custom metric engine |
+| Storage | Local uploaded files, SQLite metadata |
+| Testing/Eval | Pytest, service-layer eval runner, markdown/json eval reports |
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    User["User"] --> FE["React Frontend"]
-    FE --> API["FastAPI Backend"]
+    User["User"] --> Web["React Dashboard"]
+    Web --> API["FastAPI API"]
 
-    API --> Store["DatasetStore + SQLite metadata"]
+    API --> Upload["Upload + Data Loader"]
+    Upload --> Store["DatasetStore + SQLite metadata"]
+
     API --> Semantic["Semantic Mapper"]
+    Semantic --> Dictionary["Data Dictionary + Overrides"]
+
     API --> Dashboard["Dashboard Builder"]
-    API --> Agent["Agent Orchestrator"]
-    API --> Chart["Chart Generator"]
-
     Dashboard --> Insight["Insight Engine"]
-    Dashboard --> DomainTools["Domain Tools"]
+    Dashboard --> Charts["Chart Generator"]
 
-    Agent --> Router["Rule Router + LLM Router"]
-    Agent --> Tools["Tool Registry"]
-    Agent --> Cache["TTL Cache + Semantic Cache"]
-    Agent --> Ollama["Ollama"]
+    API --> Agent["AI Copilot Orchestrator"]
+    Agent --> Planner["Intent Planner + Tool Plan"]
+    Agent --> Tools["Deterministic Pandas Tools"]
+    Agent --> Ollama["Ollama optional LLM"]
+    Agent --> Composer["Answer Composer"]
 
-    Tools --> Generic["Generic Tools"]
-    Tools --> Ecommerce["Ecommerce Tools"]
-    Tools --> Domain["Retail / Marketing / HR Tools"]
-    Tools --> Sandbox["Code Interpreter"]
+    Tools --> Generic["Generic Analysis"]
+    Tools --> Ecommerce["Ecommerce Analytics"]
+    Tools --> Domain["Retail / Marketing / HR / Finance"]
 ```
 
 ## Project Structure
 
 ```text
-.
-├── app/
-│   ├── main.py                         # FastAPI app and endpoints
-│   ├── config.py                       # Pydantic settings
-│   ├── database.py                     # SQLAlchemy models/session
-│   ├── schemas/models.py               # Request/response schemas
-│   ├── services/
-│   │   ├── agent_orchestrator.py       # AI Copilot orchestration
-│   │   ├── cache_manager.py            # In-memory TTL cache
-│   │   ├── semantic_cache.py           # Local semantic cache via embeddings
-│   │   ├── semantic_mapper.py          # Domain and role detection
-│   │   ├── dashboard_builder.py        # Dashboard contract v2
-│   │   ├── dashboard_insight_engine.py # Insight card helpers
-│   │   ├── code_interpreter.py         # Sandboxed Pandas execution
-│   │   ├── data_loader.py              # CSV/XLS/XLSX loader
-│   │   └── storage.py                  # Dataset file + metadata access
-│   └── tools/
-│       ├── ecommerce_tools.py
-│       ├── generic_analysis_tools.py
-│       └── domain_analysis_tools.py
-├── web/
-│   └── src/
-│       ├── App.tsx
-│       ├── api.ts
-│       └── types.ts
-├── frontend/                           # Streamlit fallback/demo UI
-├── tests/
-├── docs/
-├── data/
-│   ├── raw/                            # Local raw datasets
-│   ├── sample/
-│   └── uploads/                        # Uploaded dataset files
-├── requirements.txt
-├── docker-compose.yml
-└── .env.example
+app/                 FastAPI backend, services, schemas, analytics tools
+web/                 Vite React TypeScript dashboard
+frontend/            Streamlit fallback/demo UI
+tests/               Backend and service unit tests
+evals/               Multi-domain evaluation suite
+docs/                Architecture, phase plans, acceptance docs, demo guide
+data/sample/         Small sample dataset committed to repo
+data/raw/            Local raw datasets, ignored by git
+data/uploads/        Runtime uploads, ignored by git
 ```
 
-## Quick Start
+## Quickstart
 
 ### 1. Backend
 
 ```bash
-conda create -n analyst python=3.11
-conda activate analyst
+cd ai-data-analyst-agent-starter
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+cp .env.example .env
+make backend
 ```
 
-Backend:
+Backend runs at:
 
 ```text
 http://127.0.0.1:8000
@@ -151,15 +116,21 @@ npm install
 npm run dev
 ```
 
-Frontend:
+Frontend runs at:
 
 ```text
 http://127.0.0.1:5173
 ```
 
+You can also run from the project root:
+
+```bash
+make frontend
+```
+
 ### 3. Optional Ollama
 
-The app still works without Ollama through deterministic fallback, but Ask AI is better with local models.
+The app works without Ollama through deterministic fallback. For AI explanations:
 
 ```bash
 ollama serve
@@ -167,70 +138,113 @@ ollama pull qwen2.5:3b
 ollama pull qwen2.5:7b
 ```
 
-Recommended environment:
+Suggested `.env` values:
 
-```bash
-cp .env.example .env
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_ROUTER_MODEL=qwen2.5:3b
+OLLAMA_MODEL=qwen2.5:7b
+OLLAMA_ROUTER_TIMEOUT=4
+OLLAMA_EXPLAIN_TIMEOUT=8
 ```
 
-## Docker Compose
+## Five-Minute Demo Flow
 
-```bash
-docker compose up --build
-```
+See the full guide: [docs/demo_guide.md](docs/demo_guide.md).
 
-Services:
+1. Start backend and frontend.
+2. Upload Amazon Sales or Superstore.
+3. Open Smart Dashboard and confirm domain detection.
+4. Inspect semantic mapping and data quality.
+5. Create a custom metric, for example `margin = profit / revenue`.
+6. Ask AI Copilot: `Category nào sales cao nhưng profit thấp?`
+7. Show tool result, answer card, timeline, and eval report.
 
-- Backend: `http://localhost:8000`
-- React frontend: `http://localhost:5173`
-- Streamlit fallback: `http://localhost:8501`
+## Dataset Setup
 
-## Environment Variables
+Only small sample data is committed. Large/raw datasets are intentionally ignored.
 
-Main variables from `.env.example`:
-
-| Variable | Purpose |
-|---|---|
-| `ALLOWED_ORIGINS` | Comma-separated frontend origins |
-| `MAX_UPLOAD_BYTES` | Maximum upload size |
-| `OLLAMA_BASE_URL` | Ollama server URL |
-| `OLLAMA_MODEL` | Main explanation model |
-| `OLLAMA_ROUTER_MODEL` | Smaller router model |
-| `OLLAMA_ROUTER_TIMEOUT` | Router timeout |
-| `OLLAMA_EXPLAIN_TIMEOUT` | Explanation timeout |
-| `CODE_INTERPRETER_TIMEOUT` | Python sandbox timeout |
-| `DATABASE_URL` | SQLAlchemy database URL |
-| `API_KEY` | Optional API key for simple request protection |
-| `LOG_LEVEL` | Logging level |
-
-If `API_KEY` is set, requests must include:
+Use:
 
 ```text
-X-API-Key: your-api-key
+data/raw/
+```
+
+for local datasets such as:
+
+- `Amazon Sale Report.csv`
+- `sample_-_superstore.xls`
+- `HR-Employee-Attrition.csv`
+- `Marketing+Data/marketing_data.csv`
+- `online_retail_09_10.csv`
+
+See [data/raw/README.md](data/raw/README.md) and [evals/datasets/README.md](evals/datasets/README.md).
+
+## Evaluation Suite
+
+The eval suite checks whether the system can analyze many CSV/XLS/XLSX files across domains.
+
+Run:
+
+```bash
+make eval
+```
+
+Strict mode:
+
+```bash
+PYTHONPATH=. python evals/run_eval.py \
+  --manifest evals/manifest.json \
+  --questions evals/questions \
+  --out evals/reports/latest.md \
+  --mode fast \
+  --strict
+```
+
+Measured metrics include:
+
+- domain detection accuracy
+- semantic role mapping accuracy
+- intent parsing accuracy
+- tool selection accuracy
+- numeric correctness
+- answer constraint pass rate
+- fallback rate
+- average and p95 latency
+- cache hit rate
+- error rate
+
+## Useful Commands
+
+```bash
+make backend      # FastAPI on 127.0.0.1:8000
+make frontend     # Vite React on 127.0.0.1:5173
+make test         # backend test suite
+make build-web    # TypeScript + Vite production build
+make eval         # service-layer evaluation suite
 ```
 
 ## API Highlights
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /upload` | Upload CSV/XLS/XLSX |
+| `POST /upload` | Upload CSV/XLS/XLSX dataset |
 | `GET /datasets` | List uploaded datasets |
 | `GET /summary/{dataset_id}` | Dataset profile |
-| `GET /semantic-profile/{dataset_id}` | Semantic profile and role candidates |
+| `GET /semantic-profile/{dataset_id}` | Semantic roles, candidates, confidence |
 | `PUT /semantic-profile/{dataset_id}/overrides` | Save semantic mapping overrides |
-| `DELETE /semantic-profile/{dataset_id}/overrides` | Reset semantic overrides |
-| `GET /dashboard/{dataset_id}` | Backend-driven dashboard |
+| `GET /dashboard/{dataset_id}` | Backend-driven dashboard contract |
 | `POST /chart` | Generate Plotly chart JSON |
 | `POST /agent/chat` | Ask AI Copilot |
-| `POST /agent/chat/stream` | Ask AI with SSE progress |
-| `GET /agent/status` | Ollama/agent status |
-| `GET /ecommerce/...` | Ecommerce-specific analysis endpoints |
+| `POST /agent/chat/stream` | Ask AI Copilot with progress events |
+| `GET /agent/status` | Ollama and agent status |
+| `GET /ecommerce/...` | Ecommerce-specific analytics endpoints |
 
 ## Example Questions
 
 ```text
 SKU nào có doanh thu cao nhất?
-Category nào có cancel rate cao nhất?
+Category nào có cancellation risk cao nhất?
 State nào revenue cao nhưng cancellation risk cũng cao?
 Segment nào margin thấp dù sales cao?
 Campaign nào response tốt nhất?
@@ -239,69 +253,54 @@ Cột nào thiếu dữ liệu nhiều nhất?
 Vẽ biểu đồ doanh thu theo category
 ```
 
-## Testing
-
-Run backend tests:
+## Quality Checks
 
 ```bash
-PYTHONPATH=. pytest -q
+make test
+make build-web
+make eval
 ```
 
-Or with the conda env Python:
+Latest local audit:
 
-```bash
-/home/ductien/miniconda3/envs/reis/bin/python -m pytest -q
-```
-
-Run frontend build:
-
-```bash
-cd web
-npm run build
+```text
+pytest: 126 passed
+web build: passed
+eval: 100 passed / 100 total, overall_pass=true
 ```
 
 ## Important Limitations
 
-This project is not production-ready yet.
+- Not production-ready yet.
+- No full user/workspace authentication model.
+- SQLite metadata is suitable for local MVP, not multi-tenant production.
+- File storage is local.
+- In-memory caches reset on server restart.
+- Ollama latency depends heavily on local hardware and model size.
+- Code interpreter is experimental and should be container-isolated before untrusted use.
+- Evaluation coverage is useful but should be expanded with more real-world datasets.
+- Frontend still needs deeper component-level refactoring.
 
-Current limitations:
+See [docs/15_production_readiness_roadmap_vi.md](docs/15_production_readiness_roadmap_vi.md).
 
-- API key is not a full auth/authorization system.
-- No multi-user workspace isolation yet.
-- SQLite metadata is useful for local MVP, but production should use migrations and likely PostgreSQL.
-- File storage is still local.
-- Code interpreter needs stronger container isolation before exposing to untrusted users.
-- AI Copilot needs a formal evaluation suite.
-- No full audit trail yet.
-- No production monitoring/metrics dashboard yet.
-- Frontend is still a single large app file and should be modularized.
-- Plotly bundle is large and should be lazy-loaded/code-split.
+## Roadmap
 
-See the detailed plan:
-
-- [Production Readiness Roadmap](docs/15_production_readiness_roadmap_vi.md)
+- CI/CD with GitHub Actions.
+- Better screenshots/demo video.
+- Saved analysis reports and chat history.
+- Workspace/user model and stronger auth.
+- PostgreSQL + Alembic migrations.
+- Object storage for uploaded files.
+- Stronger sandbox for code execution.
+- More evaluation datasets and benchmark questions.
+- Optional LangGraph migration once the planner workflow stabilizes.
 
 ## Documentation
 
-Key docs:
-
-- [Project Overview VI](docs/00_project_overview_vi.md)
 - [Architecture](docs/architecture.md)
-- [Phase A Copilot Stability](docs/12_phase_a_copilot_stability_acceptance_vi.md)
-- [Phase B/C Semantic Dashboard](docs/13_phase_b_c_semantic_dashboard_acceptance_vi.md)
-- [Phase D Fast Copilot + Deep Analytics](docs/14_phase_d_fast_copilot_deep_analytics_acceptance_vi.md)
+- [Capstone Review](docs/capstone_project_review_vi.md)
 - [Production Readiness Roadmap](docs/15_production_readiness_roadmap_vi.md)
-
-## Recommended Next Work
-
-The next serious sprint should focus on:
-
-1. AI evaluation suite.
-2. Agent run logging.
-3. Workspace/user model.
-4. Alembic migrations.
-5. Stronger code interpreter sandbox.
-6. Dashboard/report persistence.
-7. CI/CD and production Docker setup.
-
-This is the path from **technical MVP** to **production beta**.
+- [Universal CSV Intelligence Plan](docs/16_universal_csv_intelligence_plan_vi.md)
+- [Eval Suite Acceptance](docs/24_phase_u5_eval_suite_acceptance_vi.md)
+- [Answer Composer v2 Plan](docs/25_answer_composer_v2_ai_output_ux_plan_vi.md)
+- [Vietnamese Copy + i18n Acceptance](docs/27_phase_u7_vietnamese_copy_i18n_acceptance_vi.md)

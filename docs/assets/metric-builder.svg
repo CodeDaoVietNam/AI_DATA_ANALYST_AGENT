@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-label="Metric Builder preview">
+  <rect width="1200" height="720" fill="#111827"/>
+  <rect x="70" y="70" width="1060" height="580" rx="28" fill="#f8fafc"/>
+  <text x="116" y="142" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="38" font-weight="900">Custom Metric Builder</text>
+  <rect x="116" y="200" width="420" height="80" rx="18" fill="#e0f2fe"/>
+  <rect x="116" y="314" width="968" height="88" rx="18" fill="#0f172a"/>
+  <rect x="116" y="438" width="290" height="96" rx="20" fill="#ecfeff"/>
+  <rect x="446" y="438" width="290" height="96" rx="20" fill="#fef3c7"/>
+  <rect x="776" y="438" width="308" height="96" rx="20" fill="#eef2ff"/>
+  <text x="150" y="250" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="25" font-weight="800">margin</text>
+  <text x="150" y="368" fill="#ffffff" font-family="JetBrains Mono,Consolas,monospace" font-size="30" font-weight="800">profit / revenue</text>
+  <text x="150" y="496" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="24" font-weight="800">Format</text>
+  <text x="480" y="496" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="24" font-weight="800">Aggregation</text>
+  <text x="810" y="496" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="24" font-weight="800">Safe AST</text>
+  <text x="150" y="530" fill="#334155" font-family="Inter,Arial,sans-serif" font-size="22">percent</text>
+  <text x="480" y="530" fill="#334155" font-family="Inter,Arial,sans-serif" font-size="22">mean</text>
+  <text x="810" y="530" fill="#334155" font-family="Inter,Arial,sans-serif" font-size="22">no unsafe eval</text>
+</svg>

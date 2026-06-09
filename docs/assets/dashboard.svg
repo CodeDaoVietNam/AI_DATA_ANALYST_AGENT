@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-label="Smart Dashboard preview">
+  <rect width="1200" height="720" fill="#0f172a"/>
+  <rect x="32" y="32" width="220" height="656" rx="18" fill="#111827"/>
+  <rect x="284" y="32" width="884" height="96" rx="20" fill="#f8fafc"/>
+  <rect x="284" y="160" width="200" height="112" rx="18" fill="#ecfeff"/>
+  <rect x="508" y="160" width="200" height="112" rx="18" fill="#fef3c7"/>
+  <rect x="732" y="160" width="200" height="112" rx="18" fill="#eef2ff"/>
+  <rect x="956" y="160" width="212" height="112" rx="18" fill="#f0fdf4"/>
+  <rect x="284" y="304" width="548" height="352" rx="22" fill="#f8fafc"/>
+  <rect x="860" y="304" width="308" height="352" rx="22" fill="#f8fafc"/>
+  <text x="68" y="88" fill="#f8fafc" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="800">AI Analyst</text>
+  <text x="68" y="148" fill="#94a3b8" font-family="Inter,Arial,sans-serif" font-size="20">Upload</text>
+  <text x="68" y="196" fill="#38bdf8" font-family="Inter,Arial,sans-serif" font-size="20">Dashboard</text>
+  <text x="68" y="244" fill="#94a3b8" font-family="Inter,Arial,sans-serif" font-size="20">Ask AI</text>
+  <text x="316" y="92" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="900">Smart Dashboard</text>
+  <text x="316" y="240" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="800">KPI</text>
+  <text x="540" y="240" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="800">Insight</text>
+  <text x="764" y="240" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="800">Charts</text>
+  <text x="988" y="240" fill="#0f172a" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="800">Tables</text>
+  <polyline points="330,560 430,500 530,530 630,430 760,470" fill="none" stroke="#0891b2" stroke-width="10" stroke-linecap="round"/>
+  <rect x="900" y="360" width="228" height="22" rx="8" fill="#cbd5e1"/>
+  <rect x="900" y="420" width="180" height="22" rx="8" fill="#cbd5e1"/>
+  <rect x="900" y="480" width="210" height="22" rx="8" fill="#cbd5e1"/>
+  <rect x="900" y="540" width="140" height="22" rx="8" fill="#cbd5e1"/>
+</svg>
